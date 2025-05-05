@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.ipynb_checkpoints/
+
+
+# Environnement virtuel
+venv/
+.env
+.env.*
+
+# Fichiers de configuration utilisateur
+*.swp
+*.bak
+*.log
+*.tmp
+*.DS_Store
+
+# Dossiers de données volumineux ou temporaires
+data/landing/
+data/raw/
+data/silver/
+data/gold/
+data/tmp/
+data/output/
+data/test/
+
+# Logs
+logs/
+*.log
+
+# Fichiers de suivi
+processed_dates.json
+gold_to_snowflake_execution.log
+run_pipeline.log
+
+# Cache Snowflake ou parquet
+*.parquet
+*.csv
+*.gz
+
+# VS Code / PyCharm / IDEs
+.vscode/
+.idea/
+
+# Tests ou fichiers à ignorer manuellement
+config/local_*.json
