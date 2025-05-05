@@ -1,0 +1,12 @@
+{
+  "PROCESS_DATE": "2025-04-30 12:57:30",
+  "BRAND": "Canal Digitaal",
+  "EXTRACTION_DATE": "2025-04-16",
+  "TABLE_NAME": "Device",
+  "ROWS_TOTAL": 820270,
+  "ROWS_OK": 820270,
+  "ROWS_KO": 0,
+  "COLS_ERROR": "",
+  "STATUS": "OK",
+  "DETAILS": {}
+}

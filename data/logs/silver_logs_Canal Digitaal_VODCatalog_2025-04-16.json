@@ -1,0 +1,14 @@
+{
+  "PROCESS_DATE": "2025-04-30 12:57:55",
+  "BRAND": "Canal Digitaal",
+  "EXTRACTION_DATE": "2025-04-16",
+  "TABLE_NAME": "VODCatalog",
+  "ROWS_TOTAL": 6771,
+  "ROWS_OK": 6669,
+  "ROWS_KO": 102,
+  "COLS_ERROR": "invalid_episodes",
+  "STATUS": "KO",
+  "DETAILS": {
+    "invalid_episodes": 102
+  }
+}

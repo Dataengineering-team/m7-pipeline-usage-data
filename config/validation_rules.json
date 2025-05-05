@@ -1,0 +1,54 @@
+{
+    "User": {
+      "valid_types": {
+        "column": "UserType",
+        "allowed_values": ["Trial", "Demo", "WebDemo", "Provisioned", "Anonymous"],
+        "error_type": "invalid_user_types"
+      },
+      "required_fields": {
+        "columns": ["Name", "UserLogin"],
+        "error_type": "missing_required_fields"
+      }
+    },
+    "Device": {
+      "valid_types": {
+        "column": "device_type",
+        "allowed_values": ["STB", "Mobile", "Web", "Smart TV"],
+        "error_type": "invalid_device_types"
+      }
+    },
+    "Smartcard": {
+      "uniqueness": {
+        "columns": ["smartcard_id"],
+        "error_type": "duplicate_smartcards"
+      }
+    },
+    "Playback": {
+      "duration_validation": {
+        "condition": "PlayDurationExPause <= AssetDuration OR AssetDuration == 0",
+        "error_type": "invalid_playback_duration"
+      },
+      "duration_consistency": {
+        "condition": "PlayDuration >= PlayDurationExPause",
+        "error_type": "inconsistent_duration"
+      },
+      "user_existence": {
+        "column": "UserID",
+        "not_empty": true,
+        "error_type": "missing_user_id"
+      }
+    },
+    "EPG": {
+      "episode_validity": {
+        "condition": "NOT (season IS NULL AND episode IS NOT NULL)",
+        "error_type": "invalid_episodes"
+      }
+    },
+    "VODCatalog": {
+      "episode_consistency": {
+        "condition": "series_episode <= series_episode_count OR series_episode IS NULL OR series_episode_count IS NULL OR series_episode_count == 0",
+        "error_type": "invalid_episodes"
+      }
+    },
+    "VODCatalogExtended": {}
+  }

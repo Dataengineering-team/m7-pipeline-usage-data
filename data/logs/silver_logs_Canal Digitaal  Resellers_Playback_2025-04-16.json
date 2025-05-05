@@ -1,0 +1,14 @@
+{
+  "PROCESS_DATE": "2025-04-30 12:57:46",
+  "BRAND": "Canal Digitaal  Resellers",
+  "EXTRACTION_DATE": "2025-04-16",
+  "TABLE_NAME": "Playback",
+  "ROWS_TOTAL": 758846,
+  "ROWS_OK": 758307,
+  "ROWS_KO": 539,
+  "COLS_ERROR": "invalid_playback_duration",
+  "STATUS": "KO",
+  "DETAILS": {
+    "invalid_playback_duration": 539
+  }
+}

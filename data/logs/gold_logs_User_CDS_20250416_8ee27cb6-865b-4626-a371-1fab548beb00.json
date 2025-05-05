@@ -1,0 +1,46 @@
+{
+  "PROCESS_ID": "8ee27cb6-865b-4626-a371-1fab548beb00",
+  "PROCESS_DATE": "2025-05-02 14:59:24",
+  "EXECUTION_START": "2025-05-02 14:39:15",
+  "EXECUTION_END": "2025-05-02 14:59:24",
+  "DATE_FOLDER": "20250416",
+  "TABLE_NAME": "User",
+  "BRAND": "CDS",
+  "RESELLER": "",
+  "RECORDS_BEFORE_AGG": 483924,
+  "RECORDS_AFTER_AGG": 483924,
+  "DUPLICATES_REMOVED": 0,
+  "BRANDS_AGGREGATED": 1,
+  "CHECKS_TOTAL": 0,
+  "CHECKS_PASSED": 0,
+  "CHECKS_FAILED": 0,
+  "CHECKS_SKIPPED": 0,
+  "RECORDS_VALID": 483924,
+  "RECORDS_WARNING": 0,
+  "RECORDS_ERROR": 0,
+  "SNOWFLAKE_ROWS_INSERTED": 483924,
+  "SNOWFLAKE_ROWS_UPDATED": 0,
+  "SNOWFLAKE_ROWS_REJECTED": 0,
+  "PROCESSING_TIME_MS": 1208968,
+  "MEMORY_USAGE_MB": 4524.64,
+  "STATUS": "OK",
+  "ERROR_MESSAGE": null,
+  "BUSINESS_CHECKS_DETAILS": {
+    "validation_errors": {},
+    "error_count": 0
+  },
+  "AGGREGATION_DETAILS": {
+    "records_before": 483924,
+    "records_after": 483924,
+    "duplicates_removed": 0,
+    "key_columns": [
+      "Userid"
+    ]
+  },
+  "LOADING_DETAILS": {
+    "snowflake_rows_inserted": 483924,
+    "snowflake_rows_updated": 0,
+    "snowflake_rows_rejected": 0,
+    "table_name": "AGG_USER"
+  }
+}

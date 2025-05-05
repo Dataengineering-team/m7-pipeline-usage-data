@@ -1,0 +1,19 @@
+{
+  "PROCESS_DATE": "2025-04-29 19:00:04",
+  "BRAND": "Canal Digitaal - Resellers",
+  "EXTRACTION_DATE": "20250416",
+  "FILE_COUNT": 6,
+  "STATUS": "Partial",
+  "DETAILS": {
+    "files_present": 6,
+    "details": {
+      "Device": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 10, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_Device_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_Device_20250416.parquet'}",
+      "EPG": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 24, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_EPG_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_EPG_20250416.parquet'}",
+      "Playback": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 29, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_Playback_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_Playback_20250416.parquet'}",
+      "User": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 9, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_User_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_User_20250416.parquet'}",
+      "Smartcard": "{'status': 'NoK'}",
+      "VODCatalog": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 34, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_VODCatalog_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_VODCatalog_20250416.parquet'}",
+      "VODCatalogExtended": "{'status': 'OK', 'csv_validation': {'valid': True, 'delimiter': ',', 'columns_count': 16, 'row_count_sample': 5}, 'moved_to': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\raw\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_VODCatalogExtended_20250416.csv', 'parquet_key': 'C:\\\\Users\\\\abidine.mouliom\\\\Documents\\\\GitHub\\\\m7-pipeline-usage-local\\\\data\\\\silver\\\\20250416\\\\canal_digitaal__resellers\\\\Canal Digitaal - Resellers_VODCatalogExtended_20250416.parquet'}"
+    }
+  }
+}

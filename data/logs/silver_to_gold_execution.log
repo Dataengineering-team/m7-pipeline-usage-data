@@ -1,0 +1,56 @@
+2025-04-30 12:57:24,475 - INFO - Règles de validation chargées depuis C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\config\validation_rules.json
+2025-04-30 12:57:24,476 - INFO - Starting SILVER to GOLD processing
+2025-04-30 12:57:24,476 - INFO - Configuration:
+2025-04-30 12:57:24,477 - INFO -   BASE_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local
+2025-04-30 12:57:24,477 - INFO -   DATA_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data
+2025-04-30 12:57:24,477 - INFO -   SILVER_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver
+2025-04-30 12:57:24,477 - INFO -   GOLD_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold
+2025-04-30 12:57:24,477 - INFO -   LOGS_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs
+2025-04-30 12:57:24,478 - INFO -   EXPECTED_TABLES: ['Device', 'EPG', 'Playback', 'User', 'Smartcard', 'VODCatalog', 'VODCatalogExtended']
+2025-04-30 12:57:24,478 - INFO -   MOCK_SNOWFLAKE: True
+2025-04-30 12:57:24,478 - INFO -   LOG_LEVEL: INFO
+2025-04-30 12:57:24,478 - INFO -   PARALLEL_PROCESSING: True
+2025-04-30 12:57:24,479 - INFO -   MAX_WORKERS: 4
+2025-04-30 12:57:24,479 - INFO - Process started at: 2025-04-30 12:57:24.479418
+2025-04-30 12:57:24,479 - INFO - Début du traitement SILVER -> GOLD
+2025-04-30 12:57:24,480 - INFO - Tables trouvées: ['Device', 'EPG', 'Playback', 'User', 'VODCatalogExtended', 'VODCatalog']
+2025-04-30 12:57:24,480 - INFO - Traitement de la table Device (2 fichiers)
+2025-04-30 12:57:25,005 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_Device_20250416.parquet: brand=Canal Digitaal  Resellers, table=Device, date=20250416
+2025-04-30 12:57:25,863 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_Device_20250416.parquet: brand=Canal Digitaal, table=Device, date=20250416
+2025-04-30 12:57:30,552 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\Device_20250416.parquet (1049901 lignes)
+2025-04-30 12:57:30,675 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_Device_2025-04-16.json
+2025-04-30 12:57:30,860 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_Device_2025-04-16.json
+2025-04-30 12:57:30,860 - INFO - Traitement de la table EPG (2 fichiers)
+2025-04-30 12:57:30,947 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_EPG_20250416.parquet: brand=Canal Digitaal  Resellers, table=EPG, date=20250416
+2025-04-30 12:57:30,957 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_EPG_20250416.parquet: brand=Canal Digitaal, table=EPG, date=20250416
+2025-04-30 12:57:30,968 - ERROR - Erreur lors de l'application de la condition '~ (season .isna() & episode IS ~ NULL)': invalid syntax. Perhaps you forgot a comma? (<unknown>, line 1)
+2025-04-30 12:57:30,973 - ERROR - Erreur lors de l'application de la condition '~ (season .isna() & episode IS ~ NULL)': invalid syntax. Perhaps you forgot a comma? (<unknown>, line 1)
+2025-04-30 12:57:31,360 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\EPG_20250416.parquet (13874 lignes)
+2025-04-30 12:57:31,457 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_EPG_2025-04-16.json
+2025-04-30 12:57:31,464 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_EPG_2025-04-16.json
+2025-04-30 12:57:31,464 - INFO - Traitement de la table Playback (2 fichiers)
+2025-04-30 12:57:32,783 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_Playback_20250416.parquet: brand=Canal Digitaal, table=Playback, date=20250416
+2025-04-30 12:57:33,765 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_Playback_20250416.parquet: brand=Canal Digitaal  Resellers, table=Playback, date=20250416
+2025-04-30 12:57:45,991 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\Playback_20250416.parquet (1306420 lignes)
+2025-04-30 12:57:46,305 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_Playback_2025-04-16.json
+2025-04-30 12:57:46,621 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_Playback_2025-04-16.json
+2025-04-30 12:57:46,622 - INFO - Traitement de la table User (2 fichiers)
+2025-04-30 12:57:46,822 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_User_20250416.parquet: brand=Canal Digitaal  Resellers, table=User, date=20250416
+2025-04-30 12:57:48,109 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_User_20250416.parquet: brand=Canal Digitaal, table=User, date=20250416
+2025-04-30 12:57:52,044 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\User_20250416.parquet (546181 lignes)
+2025-04-30 12:57:52,494 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_User_2025-04-16.json
+2025-04-30 12:57:52,826 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_User_2025-04-16.json
+2025-04-30 12:57:52,828 - INFO - Traitement de la table VODCatalogExtended (2 fichiers)
+2025-04-30 12:57:52,918 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_VODCatalogExtended_20250416.parquet: brand=Canal Digitaal, table=VODCatalogExtended, date=20250416
+2025-04-30 12:57:53,007 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_VODCatalogExtended_20250416.parquet: brand=Canal Digitaal  Resellers, table=VODCatalogExtended, date=20250416
+2025-04-30 12:57:54,440 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\VODCatalogExtended_20250416.parquet (13680 lignes)
+2025-04-30 12:57:54,574 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_VODCatalogExtended_2025-04-16.json
+2025-04-30 12:57:54,586 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_VODCatalogExtended_2025-04-16.json
+2025-04-30 12:57:54,587 - INFO - Traitement de la table VODCatalog (2 fichiers)
+2025-04-30 12:57:54,667 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal\Canal Digitaal_VODCatalog_20250416.parquet: brand=Canal Digitaal, table=VODCatalog, date=20250416
+2025-04-30 12:57:54,711 - INFO - Traitement de C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\silver\20250416\canal_digitaal__resellers\Canal Digitaal - Resellers_VODCatalog_20250416.parquet: brand=Canal Digitaal  Resellers, table=VODCatalog, date=20250416
+2025-04-30 12:57:55,144 - INFO - Fichier Gold créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\VODCatalog_20250416.parquet (13518 lignes)
+2025-04-30 12:57:55,158 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal_VODCatalog_2025-04-16.json
+2025-04-30 12:57:55,172 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\silver_logs_Canal Digitaal  Resellers_VODCatalog_2025-04-16.json
+2025-04-30 12:57:55,191 - INFO - Process completed at: 2025-04-30 12:57:55.190083
+2025-04-30 12:57:55,192 - INFO - Total duration: 0:00:30.710665

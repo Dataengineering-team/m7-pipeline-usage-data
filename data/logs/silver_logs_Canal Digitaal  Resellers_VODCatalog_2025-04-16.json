@@ -1,0 +1,14 @@
+{
+  "PROCESS_DATE": "2025-04-30 12:57:55",
+  "BRAND": "Canal Digitaal  Resellers",
+  "EXTRACTION_DATE": "2025-04-16",
+  "TABLE_NAME": "VODCatalog",
+  "ROWS_TOTAL": 6747,
+  "ROWS_OK": 6648,
+  "ROWS_KO": 99,
+  "COLS_ERROR": "invalid_episodes",
+  "STATUS": "KO",
+  "DETAILS": {
+    "invalid_episodes": 99
+  }
+}

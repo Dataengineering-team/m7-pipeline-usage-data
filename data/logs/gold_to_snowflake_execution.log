@@ -1,0 +1,64 @@
+2025-05-02 14:39:15,297 - INFO - Starting GOLD to SNOWFLAKE processing
+2025-05-02 14:39:15,297 - INFO - Configuration:
+2025-05-02 14:39:15,297 - INFO -   BASE_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local
+2025-05-02 14:39:15,297 - INFO -   DATA_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data
+2025-05-02 14:39:15,297 - INFO -   GOLD_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold
+2025-05-02 14:39:15,297 - INFO -   LOGS_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs
+2025-05-02 14:39:15,297 - INFO -   CONFIG_DIR: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\config
+2025-05-02 14:39:15,297 - INFO -   EXPECTED_TABLES: ['Device', 'EPG', 'Playback', 'User', 'Smartcard', 'VODCatalog', 'VODCatalogExtended']
+2025-05-02 14:39:15,297 - INFO -   MOCK_SNOWFLAKE: True
+2025-05-02 14:39:15,297 - INFO -   LOG_LEVEL: INFO
+2025-05-02 14:39:15,297 - INFO -   PARALLEL_PROCESSING: True
+2025-05-02 14:39:15,297 - INFO -   MAX_WORKERS: 4
+2025-05-02 14:39:15,297 - INFO -   LOADED_BY: ETL_GOLD_TO_SNOWFLAKE
+2025-05-02 14:39:15,297 - INFO - Process started at: 2025-05-02 14:39:15.297627
+2025-05-02 14:39:15,297 - INFO - Début du traitement GOLD -> SNOWFLAKE
+2025-05-02 14:39:15,297 - INFO - Configuration des marques chargée depuis C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\config\brand_configs.json
+2025-05-02 14:39:15,297 - ERROR - Erreur lors du chargement des schémas de tables: Expecting value: line 1 column 1 (char 0)
+2025-05-02 14:39:15,318 - INFO - Règles de validation chargées depuis C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\config\validation_rules.json
+2025-05-02 14:39:15,322 - INFO - Fichiers trouvés dans Gold: 6
+2025-05-02 14:39:15,323 - INFO - Traitement parallèle de 6 fichiers avec 4 workers
+2025-05-02 14:39:15,324 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\Device_20250416.parquet: table=Device, date=20250416
+2025-05-02 14:39:15,324 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\EPG_20250416.parquet: table=EPG, date=20250416
+2025-05-02 14:39:15,324 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\Playback_20250416.parquet: table=Playback, date=20250416
+2025-05-02 14:39:15,325 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\User_20250416.parquet: table=User, date=20250416
+2025-05-02 14:39:32,344 - INFO - [MOCK] Chargement simulé de 5353 lignes dans la table EPG
+2025-05-02 14:39:32,460 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_EPG_Canal Digitaal  Resellers_20250416_0cd2de1f-a80f-450e-8096-b39255976a37.json
+2025-05-02 14:39:32,543 - INFO - Traitement terminé pour EPG / Canal Digitaal  Resellers / 20250416 avec statut OK
+2025-05-02 14:39:32,811 - INFO - [MOCK] Chargement simulé de 8521 lignes dans la table EPG
+2025-05-02 14:39:32,976 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_EPG_CDS_20250416_0cd2de1f-a80f-450e-8096-b39255976a37.json
+2025-05-02 14:39:33,242 - INFO - Traitement terminé pour EPG / Canal Digitaal / 20250416 avec statut OK
+2025-05-02 14:39:33,347 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\VODCatalogExtended_20250416.parquet: table=VODCatalogExtended, date=20250416
+2025-05-02 14:39:45,476 - INFO - [MOCK] Chargement simulé de 6754 lignes dans la table VODCatalogExtended
+2025-05-02 14:39:45,775 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_VODCatalogExtended_CDS_20250416_dd93a80d-5be6-47db-b89b-1c130769df43.json
+2025-05-02 14:39:46,475 - INFO - Traitement terminé pour VODCatalogExtended / Canal Digitaal / 20250416 avec statut OK
+2025-05-02 14:39:47,731 - INFO - [MOCK] Chargement simulé de 6730 lignes dans la table VODCatalogExtended
+2025-05-02 14:39:48,110 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_VODCatalogExtended_Canal Digitaal  Resellers_20250416_dd93a80d-5be6-47db-b89b-1c130769df43.json
+2025-05-02 14:39:49,241 - INFO - Traitement terminé pour VODCatalogExtended / Canal Digitaal  Resellers / 20250416 avec statut OK
+2025-05-02 14:39:50,425 - INFO - Traitement du fichier C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\gold\VODCatalog_20250416.parquet: table=VODCatalog, date=20250416
+2025-05-02 14:40:06,758 - INFO - [MOCK] Chargement simulé de 6678 lignes dans la table VODCatalog
+2025-05-02 14:40:07,739 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_VODCatalog_CDS_20250416_dc1ad1a0-2d6b-4981-888f-b476393c749a.json
+2025-05-02 14:40:07,922 - INFO - Traitement terminé pour VODCatalog / Canal Digitaal / 20250416 avec statut WARNING
+2025-05-02 14:40:10,855 - INFO - [MOCK] Chargement simulé de 6654 lignes dans la table VODCatalog
+2025-05-02 14:40:11,605 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_VODCatalog_Canal Digitaal  Resellers_20250416_dc1ad1a0-2d6b-4981-888f-b476393c749a.json
+2025-05-02 14:40:11,670 - INFO - Traitement terminé pour VODCatalog / Canal Digitaal  Resellers / 20250416 avec statut WARNING
+2025-05-02 14:52:25,266 - INFO - [MOCK] Chargement simulé de 229631 lignes dans la table Device
+2025-05-02 14:52:25,407 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_Device_Canal Digitaal  Resellers_20250416_9de18366-56e2-4b8e-92c8-2b4bddbee7b6.json
+2025-05-02 14:52:25,517 - INFO - Traitement terminé pour Device / Canal Digitaal  Resellers / 20250416 avec statut OK
+2025-05-02 14:52:29,509 - INFO - [MOCK] Chargement simulé de 820270 lignes dans la table Device
+2025-05-02 14:52:29,849 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_Device_CDS_20250416_9de18366-56e2-4b8e-92c8-2b4bddbee7b6.json
+2025-05-02 14:52:29,865 - INFO - Traitement terminé pour Device / Canal Digitaal / 20250416 avec statut OK
+2025-05-02 14:59:21,996 - INFO - [MOCK] Chargement simulé de 62257 lignes dans la table User
+2025-05-02 14:59:22,099 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_User_Canal Digitaal  Resellers_20250416_8ee27cb6-865b-4626-a371-1fab548beb00.json
+2025-05-02 14:59:22,131 - INFO - Traitement terminé pour User / Canal Digitaal  Resellers / 20250416 avec statut OK
+2025-05-02 14:59:24,261 - INFO - [MOCK] Chargement simulé de 483924 lignes dans la table User
+2025-05-02 14:59:24,357 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_User_CDS_20250416_8ee27cb6-865b-4626-a371-1fab548beb00.json
+2025-05-02 14:59:24,389 - INFO - Traitement terminé pour User / Canal Digitaal / 20250416 avec statut OK
+2025-05-02 15:06:48,269 - INFO - [MOCK] Chargement simulé de 547574 lignes dans la table Playback
+2025-05-02 15:06:48,273 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_Playback_CDS_20250416_f6c414aa-f0fe-40d5-a270-9ca540e770b5.json
+2025-05-02 15:06:48,273 - INFO - Traitement terminé pour Playback / Canal Digitaal / 20250416 avec statut WARNING
+2025-05-02 15:06:52,875 - INFO - [MOCK] Chargement simulé de 758846 lignes dans la table Playback
+2025-05-02 15:06:52,878 - INFO - Log local créé: C:\Users\abidine.mouliom\Documents\GitHub\m7-pipeline-usage-local\data\logs\gold_logs_Playback_Canal Digitaal  Resellers_20250416_f6c414aa-f0fe-40d5-a270-9ca540e770b5.json
+2025-05-02 15:06:52,881 - INFO - Traitement terminé pour Playback / Canal Digitaal  Resellers / 20250416 avec statut WARNING
+2025-05-02 15:06:53,779 - INFO - Process completed at: 2025-05-02 15:06:53.779782
+2025-05-02 15:06:53,781 - INFO - Total duration: 0:27:38.482155

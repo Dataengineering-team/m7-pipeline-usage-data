@@ -1,0 +1,14 @@
+{
+  "PROCESS_DATE": "2025-04-30 12:57:31",
+  "BRAND": "Canal Digitaal",
+  "EXTRACTION_DATE": "2025-04-16",
+  "TABLE_NAME": "EPG",
+  "ROWS_TOTAL": 8521,
+  "ROWS_OK": 0,
+  "ROWS_KO": 8521,
+  "COLS_ERROR": "invalid_episodes",
+  "STATUS": "KO",
+  "DETAILS": {
+    "invalid_episodes": 8521
+  }
+}

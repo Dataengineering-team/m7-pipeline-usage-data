@@ -1,0 +1,47 @@
+{
+  "PROCESS_ID": "9de18366-56e2-4b8e-92c8-2b4bddbee7b6",
+  "PROCESS_DATE": "2025-05-02 14:52:29",
+  "EXECUTION_START": "2025-05-02 14:39:15",
+  "EXECUTION_END": "2025-05-02 14:52:29",
+  "DATE_FOLDER": "20250416",
+  "TABLE_NAME": "Device",
+  "BRAND": "CDS",
+  "RESELLER": "",
+  "RECORDS_BEFORE_AGG": 820270,
+  "RECORDS_AFTER_AGG": 820270,
+  "DUPLICATES_REMOVED": 0,
+  "BRANDS_AGGREGATED": 1,
+  "CHECKS_TOTAL": 0,
+  "CHECKS_PASSED": 0,
+  "CHECKS_FAILED": 0,
+  "CHECKS_SKIPPED": 0,
+  "RECORDS_VALID": 820270,
+  "RECORDS_WARNING": 0,
+  "RECORDS_ERROR": 0,
+  "SNOWFLAKE_ROWS_INSERTED": 820270,
+  "SNOWFLAKE_ROWS_UPDATED": 0,
+  "SNOWFLAKE_ROWS_REJECTED": 0,
+  "PROCESSING_TIME_MS": 794281,
+  "MEMORY_USAGE_MB": 5867.0,
+  "STATUS": "OK",
+  "ERROR_MESSAGE": null,
+  "BUSINESS_CHECKS_DETAILS": {
+    "validation_errors": {},
+    "error_count": 0
+  },
+  "AGGREGATION_DETAILS": {
+    "records_before": 820270,
+    "records_after": 820270,
+    "duplicates_removed": 0,
+    "key_columns": [
+      "Userid",
+      "Serial"
+    ]
+  },
+  "LOADING_DETAILS": {
+    "snowflake_rows_inserted": 820270,
+    "snowflake_rows_updated": 0,
+    "snowflake_rows_rejected": 0,
+    "table_name": "AGG_DEVICE"
+  }
+}

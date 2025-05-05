@@ -1,0 +1,48 @@
+{
+  "PROCESS_ID": "f6c414aa-f0fe-40d5-a270-9ca540e770b5",
+  "PROCESS_DATE": "2025-05-02 15:06:48",
+  "EXECUTION_START": "2025-05-02 14:39:15",
+  "EXECUTION_END": "2025-05-02 15:06:48",
+  "DATE_FOLDER": "20250416",
+  "TABLE_NAME": "Playback",
+  "BRAND": "CDS",
+  "RESELLER": "",
+  "RECORDS_BEFORE_AGG": 547574,
+  "RECORDS_AFTER_AGG": 547574,
+  "DUPLICATES_REMOVED": 0,
+  "BRANDS_AGGREGATED": 1,
+  "CHECKS_TOTAL": 1,
+  "CHECKS_PASSED": 0,
+  "CHECKS_FAILED": 1,
+  "CHECKS_SKIPPED": 0,
+  "RECORDS_VALID": 546954,
+  "RECORDS_WARNING": 0,
+  "RECORDS_ERROR": 620,
+  "SNOWFLAKE_ROWS_INSERTED": 547574,
+  "SNOWFLAKE_ROWS_UPDATED": 0,
+  "SNOWFLAKE_ROWS_REJECTED": 0,
+  "PROCESSING_TIME_MS": 1652945,
+  "MEMORY_USAGE_MB": 998.95,
+  "STATUS": "WARNING",
+  "ERROR_MESSAGE": "1 checks failed with 620 records in error",
+  "BUSINESS_CHECKS_DETAILS": {
+    "validation_errors": {
+      "invalid_playback_duration": 620
+    },
+    "error_count": 620
+  },
+  "AGGREGATION_DETAILS": {
+    "records_before": 547574,
+    "records_after": 547574,
+    "duplicates_removed": 0,
+    "key_columns": [
+      "PlaySessionID"
+    ]
+  },
+  "LOADING_DETAILS": {
+    "snowflake_rows_inserted": 547574,
+    "snowflake_rows_updated": 0,
+    "snowflake_rows_rejected": 0,
+    "table_name": "AGG_PLAYBACK"
+  }
+}

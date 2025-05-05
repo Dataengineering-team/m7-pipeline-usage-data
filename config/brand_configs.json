@@ -1,0 +1,29 @@
+{
+    "brands": [
+      {
+        "file_name": "Canal Digitaal",
+        "brand_name": "Canal Digitaal",
+        "brand_code": "CDS"
+      },
+      {
+        "file_name": "Canal Digitaal - Resellers",
+        "brand_name": "Canal Digitaal",
+        "brand_code": "CDR"
+      },
+      {
+        "file_name": "Arthaus Plus DE",
+        "brand_name": "Arthaus Plus DE",
+        "brand_code": "AH"
+      },
+      {
+        "file_name": "Canal+ Austria",
+        "brand_name": "Canal+ Austria",
+        "brand_code": "CA"
+      },
+      {
+        "file_name": "CanalPlus Austria",
+        "brand_name": "Canal+ Austria",
+        "brand_code": "CPA"      
+      }
+     
+    ]}
