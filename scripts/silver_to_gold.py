@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+"""
+This script processes Parquet files from the silver layer and consolidates them into the gold layer.
+It supports date-specific processing and data validation based on business rules.
+"""
 import os
 import json
 import re
 import logging
 import traceback
+import argparse
 import pandas as pd
 import numpy as np
+import sys
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -15,44 +21,45 @@ import snowflake.connector
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.validation_utils import load_validation_rules, validate_with_rules
 
-# Chargement des variables d'environnement du fichier .env
+# Load environment variables from .env file
 load_dotenv()
 
 # ===== CONFIG =====
-# Chemins de base
+# Base paths
 BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
 
-# Gestion des chemins relatifs vs absolus depuis .env
+# Handle relative vs absolute paths from .env
 data_dir_env = os.getenv('DATA_DIR')
 if data_dir_env:
-    # Si le chemin commence par ./ ou est relatif sans slash, le considérer comme relatif à BASE_DIR
+    # If path starts with ./ or is relative without slash, consider it relative to BASE_DIR
     if data_dir_env.startswith('./') or not ('/' in data_dir_env or '\\' in data_dir_env):
         DATA_DIR = BASE_DIR / data_dir_env.lstrip('./')
-    # Sinon utiliser le chemin tel quel (absolu)
+    # Otherwise use the path as is (absolute)
     else:
         DATA_DIR = Path(data_dir_env)
 else:
-    # Valeur par défaut si DATA_DIR n'est pas défini
+    # Default value if DATA_DIR is not defined
     DATA_DIR = BASE_DIR / "data"
 
-# Définition explicite de tous les autres chemins par rapport à DATA_DIR
+# Define explicit paths relative to DATA_DIR
 SILVER_DIR = DATA_DIR / os.getenv('SILVER_SUBDIR', 'silver')
 GOLD_DIR = DATA_DIR / os.getenv('GOLD_SUBDIR', 'gold')
 LOGS_DIR = DATA_DIR / os.getenv('LOGS_SUBDIR', 'logs')
 
-# Conversion des chemins en chemins absolus pour le logging
+# Convert paths to absolute for logging
 SILVER_DIR = SILVER_DIR.resolve()
 GOLD_DIR = GOLD_DIR.resolve()
 LOGS_DIR = LOGS_DIR.resolve()
 
-# Paramètres de traitement
+# Processing parameters
 EXPECTED_TABLES = os.getenv('EXPECTED_TABLES', "Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended").split(',')
 MOCK_SNOWFLAKE = os.getenv('MOCK_SNOWFLAKE', 'true').lower() == 'true'
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 PARALLEL_PROCESSING = os.getenv('PARALLEL_PROCESSING', 'true').lower() == 'true'
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '4'))
+DELETE_SILVER_FILES_AFTER_LOAD = os.getenv('DELETE_SILVER_FILES_AFTER_LOAD', 'false').lower() == 'true'
 
-# Paramètres Snowflake
+# Snowflake parameters
 SF_USER = os.getenv('SNOWFLAKE_USER')
 SF_PWD = os.getenv('SNOWFLAKE_PASSWORD')
 SF_ACCOUNT = os.getenv('SNOWFLAKE_ACCOUNT')
@@ -60,7 +67,7 @@ SF_WHS = os.getenv('SNOWFLAKE_WAREHOUSE')
 SF_DB = os.getenv('SNOWFLAKE_DATABASE')
 SF_SCHEMA = os.getenv('SNOWFLAKE_SCHEMA', 'STG_SG_MONITORING')
 
-# Assurez-vous que ces répertoires existent
+# Ensure these directories exist
 SILVER_DIR.mkdir(exist_ok=True, parents=True)
 GOLD_DIR.mkdir(exist_ok=True, parents=True)
 LOGS_DIR.mkdir(exist_ok=True, parents=True)
@@ -77,12 +84,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Charger les règles de validation
+# Load validation rules
 validation_rules = load_validation_rules()
 
-# Classe pour gérer la sérialisation JSON personnalisée
+# Custom JSON Encoder class to handle serialization
 class CustomJSONEncoder(json.JSONEncoder):
-    """Encodeur JSON personnalisé pour gérer les types non-sérialisables"""
+    """Custom JSON encoder to handle non-serializable types"""
     def default(self, obj):
         if isinstance(obj, pd.Timestamp):
             return obj.isoformat()
@@ -97,9 +104,9 @@ class CustomJSONEncoder(json.JSONEncoder):
         except TypeError:
             return str(obj)
 
-# Afficher la configuration au démarrage
+# Display configuration at startup
 def log_config():
-    """Affiche la configuration actuelle dans les logs"""
+    """Log the current configuration"""
     config = {
         "BASE_DIR": str(BASE_DIR),
         "DATA_DIR": str(DATA_DIR),
@@ -110,7 +117,8 @@ def log_config():
         "MOCK_SNOWFLAKE": MOCK_SNOWFLAKE,
         "LOG_LEVEL": LOG_LEVEL,
         "PARALLEL_PROCESSING": PARALLEL_PROCESSING,
-        "MAX_WORKERS": MAX_WORKERS
+        "MAX_WORKERS": MAX_WORKERS,
+        "DELETE_SILVER_FILES_AFTER_LOAD": DELETE_SILVER_FILES_AFTER_LOAD
     }
     logger.info("Configuration:")
     for key, value in config.items():
@@ -119,27 +127,27 @@ def log_config():
 # Utility: Extract brand and date from path
 def extract_info_from_path(file_path):
     """
-    Extrait la marque et la date à partir du chemin du fichier
-    Exemple: silver/20250416/canal_digitaal/Device.parquet -> ('canal_digitaal', '20250416')
+    Extracts brand and date from file path
+    Example: silver/20250416/canal_digitaal/Device.parquet -> ('canal_digitaal', '20250416')
     """
     try:
-        # Le dossier parent du fichier contient le nom de la marque
+        # Brand name is in the parent directory of the file
         brand_slug = file_path.parent.name
-        # Convertir le slug en nom plus lisible
+        # Convert slug to more readable name
         brand = brand_slug.replace('_', ' ').title()
         
-        # La date est le nom du dossier parent du parent (structure: silver/DATE/BRAND/FILE.parquet)
+        # Date is in the parent of the parent directory (structure: silver/DATE/BRAND/FILE.parquet)
         file_date = file_path.parent.parent.name
         
         return brand, file_date
     except Exception as e:
-        logger.error(f"Erreur lors de l'extraction des informations depuis {file_path}: {e}")
+        logger.error(f"Error extracting information from {file_path}: {e}")
         return "unknown_brand", "unknown_date"
 
-# Fonction locale pour simuler l'insertion de logs dans Snowflake
+# Local function to simulate log insertion into Snowflake
 def insert_log_local(proc_date, brand, extraction_date, table_name, rows_total, rows_ok, rows_ko, cols_error, status, details):
     """
-    Version locale de la fonction insert_log qui écrit dans un fichier JSON
+    Local version of insert_log that writes to a JSON file
     """
     log_entry = {
         "PROCESS_DATE": proc_date,
@@ -154,25 +162,25 @@ def insert_log_local(proc_date, brand, extraction_date, table_name, rows_total, 
         "DETAILS": details
     }
     
-    # Créer un nom de fichier unique basé sur la date, la marque et la table
+    # Create a unique filename based on date, brand and table
     filename = LOGS_DIR / f"silver_logs_{brand}_{table_name}_{extraction_date}.json"
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            # Utiliser l'encodeur personnalisé pour gérer les types non-sérialisables
+            # Use the custom encoder to handle non-serializable types
             json.dump(log_entry, f, indent=2, cls=CustomJSONEncoder)
         
-        logger.info(f"Log local créé: {filename}")
+        logger.info(f"Local log created: {filename}")
     except Exception as e:
-        logger.error(f"Erreur lors de l'écriture du log local: {e}")
+        logger.error(f"Error writing local log: {e}")
         logger.error(traceback.format_exc())
 
-# Insertion des logs dans Snowflake
+# Log insertion into Snowflake
 def insert_log_snowflake(proc_date, brand, extraction_date, table_name, rows_total, rows_ok, rows_ko, cols_error, status, details):
     """
-    Insère un enregistrement de log dans Snowflake
+    Inserts a log record into Snowflake
     """
     try:
-        # Convertir les détails en JSON sérialisable
+        # Convert details to serializable JSON
         details_json = json.dumps(details, cls=CustomJSONEncoder)
         
         ctx = snowflake.connector.connect(
@@ -214,28 +222,28 @@ def insert_log_snowflake(proc_date, brand, extraction_date, table_name, rows_tot
         except Exception:
             pass
 
-# Fonction de validation basée sur les règles externes
+# Validation function based on external rules
 def get_validation_function(table_name):
     """
-    Retourne une fonction de validation qui applique les règles définies dans le fichier de configuration
-    pour la table spécifiée
+    Returns a validation function that applies the rules defined in the configuration file
+    for the specified table
     """
     def validate_with_loaded_rules(df):
-        """Fonction de validation qui utilise les règles chargées pour la table"""
+        """Validation function that uses loaded rules for the table"""
         return validate_with_rules(df, table_name, validation_rules)
     
     return validate_with_loaded_rules
 
-# Harmoniser les types de données dans les DataFrames
+# Harmonize data types across DataFrames
 def harmonize_dataframe_types(dfs):
     """
-    Harmonise les types de données à travers plusieurs DataFrames pour éviter les erreurs de conversion
-    lors de la fusion et de l'écriture Parquet
+    Harmonizes data types across multiple DataFrames to avoid conversion errors
+    during merge and Parquet writing
     """
     if not dfs or len(dfs) == 0:
         return []
     
-    # Identifier toutes les colonnes à travers tous les DataFrames
+    # Identify all columns across all DataFrames
     all_columns = set()
     for df in dfs:
         all_columns.update(df.columns)
@@ -243,96 +251,96 @@ def harmonize_dataframe_types(dfs):
     harmonized_dfs = []
     
     for df in dfs:
-        # Créer une copie pour ne pas modifier l'original
+        # Create a copy to avoid modifying the original
         df_copy = df.copy()
         
-        # Pour chaque colonne dans ce DataFrame
+        # For each column in this DataFrame
         for col in df_copy.columns:
-            # Si la colonne contient des objets Python, la convertir en chaîne
+            # If column contains Python objects, convert to string
             if df_copy[col].dtype == 'object':
-                # Convertir les NaN en None
+                # Convert NaN to None
                 df_copy[col] = df_copy[col].where(pd.notna(df_copy[col]), None)
                 
-                # Convertir tous les éléments en chaînes de caractères pour éviter les types mixtes
+                # Convert all elements to strings to avoid mixed types
                 df_copy[col] = df_copy[col].apply(lambda x: str(x) if x is not None else None)
             
-            # Gérer spécifiquement les colonnes problématiques connues
+            # Handle specific problematic columns
             if col == 'SSOID':
-                # Convertir SSOID en chaîne pour éviter l'erreur "Expected bytes, got a 'float' object"
+                # Convert SSOID to string to avoid "Expected bytes, got a 'float' object" error
                 df_copy[col] = df_copy[col].apply(lambda x: str(x) if x is not None and pd.notna(x) else None)
         
         harmonized_dfs.append(df_copy)
     
     return harmonized_dfs
 
-# Déterminer le nom de base de la table depuis le nom du fichier
+# Determine base table name from filename
 def get_table_name_from_file(file_path):
     """
-    Extrait le nom de base de la table à partir du nom de fichier
-    Exemples:
+    Extracts base table name from filename
+    Examples:
     - 'Canal Digitaal_Device_20250416.parquet' -> 'Device'
     - 'Canal Digitaal - Resellers_Playback_20250416.parquet' -> 'Playback'
     """
     filename = file_path.name
-    # Enlever l'extension
+    # Remove extension
     if filename.lower().endswith('.parquet'):
-        filename = filename[:-8]  # Enlever '.parquet'
+        filename = filename[:-8]  # Remove '.parquet'
     
-    # Trouver les parties du nom
+    # Find name parts
     parts = filename.split('_')
     
-    # Le nom de la table est généralement l'avant-dernière partie
-    # (Marque_Table_Date ou Marque_Sous-Marque_Table_Date)
+    # Table name is usually the second to last part
+    # (Brand_Table_Date or Brand_SubBrand_Table_Date)
     if len(parts) >= 2:
-        # Si la dernière partie est une date, la table est l'avant-dernière partie
-        if parts[-1].isdigit() and len(parts[-1]) == 8:  # Format date YYYYMMDD
+        # If the last part is a date, table is the second to last part
+        if parts[-1].isdigit() and len(parts[-1]) == 8:  # YYYYMMDD date format
             return parts[-2]
     
-    # Détecter des noms de table connus dans le nom de fichier
+    # Detect known table names in the filename
     for known_table in EXPECTED_TABLES:
         if known_table in filename:
             return known_table
     
-    # Fallback - utiliser le nom du fichier sans extension
+    # Fallback - use file stem without extension
     return file_path.stem
 
-# Traitement d'un fichier Parquet individuel
+# Process individual Parquet file
 def process_single_parquet(file_path):
     """
-    Traite un fichier Parquet individuel, ajoute les colonnes BRAND et FILEDATE et effectue les validations
-    Retourne un DataFrame enrichi et des informations de validation
+    Processes a single Parquet file, adds BRAND and FILEDATE columns and performs validations
+    Returns an enriched DataFrame and validation information
     """
     try:
-        # Lecture du fichier Parquet
+        # Read Parquet file
         df = pd.read_parquet(file_path)
         
-        # Extraction des informations importantes
+        # Extract important information
         brand, file_date = extract_info_from_path(file_path)
         
-        # Déterminer le nom de la table depuis le nom du fichier
+        # Determine table name from filename
         table_name = get_table_name_from_file(file_path)
         
-        # Formatage de la date d'extraction pour l'affichage
+        # Format extraction date for display
         extraction_date = file_date
-        if len(file_date) == 8:  # Format YYYYMMDD
+        if len(file_date) == 8:  # YYYYMMDD format
             extraction_date = f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
         
-        logger.info(f"Traitement de {file_path}: brand={brand}, table={table_name}, date={file_date}")
+        logger.info(f"Processing {file_path}: brand={brand}, table={table_name}, date={file_date}")
         
-        # Ajouter les colonnes BRAND et FILEDATE
+        # Add BRAND and FILEDATE columns
         df['BRAND'] = brand
         df['FILEDATE'] = file_date
         
-        # Effectuer les validations spécifiques à ce type de table
+        # Perform validations specific to this table type
         validation_function = get_validation_function(table_name)
         validation_errors, error_rows = validation_function(df)
         
-        # Calcul des statistiques
+        # Calculate statistics
         rows_total = len(df)
         rows_ko = len(error_rows)
         rows_ok = rows_total - rows_ko
         
-        # Création du rapport de validation
+        # Create validation report
         validation_report = {
             'file_path': str(file_path),
             'brand': brand,
@@ -343,42 +351,80 @@ def process_single_parquet(file_path):
             'rows_ok': rows_ok,
             'rows_ko': rows_ko,
             'errors': validation_errors,
-            'error_rows': error_rows[:100] if len(error_rows) > 100 else error_rows  # Limiter le nombre d'erreurs pour éviter des logs trop volumineux
+            'error_rows': error_rows[:100] if len(error_rows) > 100 else error_rows  # Limit number of errors to avoid too large logs
         }
         
         return df, validation_report
     
     except Exception as e:
-        logger.error(f"Erreur lors du traitement de {file_path}: {e}")
+        logger.error(f"Error processing {file_path}: {e}")
         logger.error(traceback.format_exc())
-        # Retourner un DataFrame vide et un rapport d'erreur
+        # Return empty DataFrame and error report
         return pd.DataFrame(), {
             'file_path': str(file_path),
             'error': str(e),
             'traceback': traceback.format_exc()
         }
 
-# Fonction principale de traitement
-def process_silver_to_gold():
+# Clean up silver files after successful processing
+def clean_silver_files(date_str):
     """
-    Traite les fichiers du Silver layer pour les convertir en Gold layer
-    """
-    logger.info("Début du traitement SILVER -> GOLD")
+    Removes silver files for a specific date after successful processing if configured.
     
-    # 1. Regrouper tous les fichiers Parquet par type de table
+    Args:
+        date_str: Date in YYYYMMDD format
+    """
+    if not DELETE_SILVER_FILES_AFTER_LOAD:
+        return
+    
+    silver_date_dir = SILVER_DIR / date_str
+    
+    if silver_date_dir.exists():
+        logger.info(f"Removing silver files for {date_str}")
+        try:
+            # Instead of removing the entire directory, just remove .parquet files
+            # to preserve the directory structure
+            for parquet_file in silver_date_dir.glob('**/*.parquet'):
+                parquet_file.unlink()
+                logger.debug(f"Removed silver file: {parquet_file}")
+            
+            logger.info(f"Successfully removed silver files for {date_str}")
+        except Exception as e:
+            logger.error(f"Error removing silver files for {date_str}: {e}")
+            logger.error(traceback.format_exc())
+
+# Main processing function
+def process_silver_to_gold(specific_date=None):
+    """
+    Processes files from Silver layer to convert them to Gold layer
+    
+    Args:
+        specific_date: Optional date string in YYYYMMDD format to filter processing
+        
+    Returns:
+        Boolean indicating success
+    """
+    logger.info("Starting SILVER -> GOLD processing")
+    if specific_date:
+        logger.info(f"Processing restricted to date: {specific_date}")
+    
+    # 1. Group all Parquet files by table type
     parquet_files_by_table = {}
-    table_dates = {}  # Pour stocker les dates uniques par table
+    table_dates = {}  # To store unique dates per table
     
     try:
-        # Parcourir tous les fichiers Parquet dans le Silver layer
-        for parquet_file in SILVER_DIR.glob('**/*.parquet'):
-            # Extraire le nom de la table depuis le nom du fichier
+        # Process pattern based on whether specific_date is provided
+        pattern = f"{specific_date}/**/*.parquet" if specific_date else "**/*.parquet"
+        
+        # Browse all Parquet files in Silver layer
+        for parquet_file in SILVER_DIR.glob(pattern):
+            # Extract table name from filename
             table_name = get_table_name_from_file(parquet_file)
             
-            # Extraire la date du fichier
+            # Extract file date
             _, file_date = extract_info_from_path(parquet_file)
             
-            # Regrouper les fichiers par table
+            # Group files by table
             if table_name not in parquet_files_by_table:
                 parquet_files_by_table[table_name] = []
                 table_dates[table_name] = set()
@@ -387,30 +433,30 @@ def process_silver_to_gold():
             table_dates[table_name].add(file_date)
             
     except Exception as e:
-        logger.error(f"Erreur lors du scan des fichiers Parquet: {e}")
+        logger.error(f"Error scanning Parquet files: {e}")
         logger.error(traceback.format_exc())
         return False
     
-    # Si aucun fichier trouvé, terminer
+    # If no files found, terminate
     if not parquet_files_by_table:
-        logger.warning("Aucun fichier Parquet trouvé dans le Silver layer")
+        logger.warning("No Parquet files found in Silver layer")
         return False
     
-    logger.info(f"Tables trouvées: {list(parquet_files_by_table.keys())}")
+    logger.info(f"Tables found: {list(parquet_files_by_table.keys())}")
     
-    # 2. Traiter chaque type de table
+    # 2. Process each table type
     all_validations = []
     success = True
     
     for table_name, files in parquet_files_by_table.items():
-        logger.info(f"Traitement de la table {table_name} ({len(files)} fichiers)")
+        logger.info(f"Processing table {table_name} ({len(files)} files)")
         
-        # Créer le répertoire Gold s'il n'existe pas
+        # Create Gold directory if it doesn't exist
         GOLD_DIR.mkdir(exist_ok=True, parents=True)
         
-        # Pour chaque date unique de cette table
+        # For each unique date of this table
         for file_date in table_dates[table_name]:
-            # Filtrer les fichiers pour cette date
+            # Filter files for this date
             date_files = [f for f in files if extract_info_from_path(f)[1] == file_date]
             
             if not date_files:
@@ -419,16 +465,16 @@ def process_silver_to_gold():
             processed_dfs = []
             table_validations = []
             
-            # Traitement parallèle ou séquentiel
+            # Parallel or sequential processing
             if PARALLEL_PROCESSING and len(date_files) > 1:
                 futures = {}
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                    # Soumettre les tâches
+                    # Submit tasks
                     for file_path in date_files:
                         future = executor.submit(process_single_parquet, file_path)
                         futures[future] = file_path
                     
-                    # Collecter les résultats
+                    # Collect results
                     for future in as_completed(futures):
                         file_path = futures[future]
                         try:
@@ -437,70 +483,70 @@ def process_silver_to_gold():
                                 processed_dfs.append(df)
                                 table_validations.append(validation)
                         except Exception as e:
-                            logger.error(f"Erreur lors du traitement parallèle de {file_path}: {e}")
+                            logger.error(f"Error in parallel processing of {file_path}: {e}")
                             logger.error(traceback.format_exc())
             else:
-                # Traitement séquentiel
+                # Sequential processing
                 for file_path in date_files:
                     df, validation = process_single_parquet(file_path)
                     if not df.empty:
                         processed_dfs.append(df)
                         table_validations.append(validation)
             
-            # S'il n'y a pas de données valides, passer à la date suivante
+            # If there are no valid data, move to next date
             if not processed_dfs:
-                logger.warning(f"Aucune donnée valide pour la table {table_name} à la date {file_date}")
+                logger.warning(f"No valid data for table {table_name} on date {file_date}")
                 continue
             
-            # 3. Fusionner tous les DataFrames pour cette table et cette date
+            # 3. Merge all DataFrames for this table and date
             try:
-                # Harmoniser les types de données avant la fusion
+                # Harmonize data types before merging
                 harmonized_dfs = harmonize_dataframe_types(processed_dfs)
                 
-                # Fusionner les DataFrames harmonisés
+                # Merge harmonized DataFrames
                 merged_df = pd.concat(harmonized_dfs, ignore_index=True)
                 
-                # Chemin du fichier Gold pour cette table et cette date
+                # Path of Gold file for this table and date
                 gold_file_path = GOLD_DIR / f"{table_name}_{file_date}.parquet"
                 
-                # Écrire le fichier Gold avec gestion des erreurs
+                # Write Gold file with error handling
                 try:
-                    # Essayer d'écrire le fichier directement
+                    # Try to write file directly
                     merged_df.to_parquet(gold_file_path, index=False)
                 except Exception as e:
-                    logger.warning(f"Erreur lors de l'écriture directe de {gold_file_path}: {e}")
-                    # Stratégie alternative: convertir en CSV puis charger de nouveau
+                    logger.warning(f"Error in direct writing of {gold_file_path}: {e}")
+                    # Alternative strategy: convert to CSV then load again
                     csv_temp = LOGS_DIR / f"temp_{table_name}_{file_date}.csv"
-                    logger.info(f"Essai de conversion à travers CSV: {csv_temp}")
+                    logger.info(f"Trying conversion through CSV: {csv_temp}")
                     
-                    # Écrire en CSV
+                    # Write to CSV
                     merged_df.to_csv(csv_temp, index=False)
                     
-                    # Recharger le CSV et écrire en Parquet
+                    # Reload CSV and write to Parquet
                     temp_df = pd.read_csv(csv_temp)
-                    # Résoudre les problèmes de type de données
+                    # Resolve data type issues
                     for col in temp_df.columns:
                         if col == 'SSOID' or col.endswith('ID') or 'id' in col.lower():
                             temp_df[col] = temp_df[col].astype(str)
                     
                     temp_df.to_parquet(gold_file_path, index=False)
                     
-                    # Nettoyer
+                    # Clean up
                     if csv_temp.exists():
                         os.remove(csv_temp)
                 
-                logger.info(f"Fichier Gold créé: {gold_file_path} ({len(merged_df)} lignes)")
+                logger.info(f"Gold file created: {gold_file_path} ({len(merged_df)} rows)")
                 
-                # 4. Écrire les logs pour chaque brand/table
+                # 4. Write logs for each brand/table
                 brands = merged_df['BRAND'].unique()
                 
                 for brand in brands:
                     brand_df = merged_df[merged_df['BRAND'] == brand]
                     
-                    # Trouver les validations correspondant à cette marque
+                    # Find validations corresponding to this brand
                     brand_validations = [v for v in table_validations if v.get('brand') == brand]
                     
-                    # Agréger les erreurs
+                    # Aggregate errors
                     cols_error = []
                     rows_total = len(brand_df)
                     rows_ko = 0
@@ -513,7 +559,7 @@ def process_silver_to_gold():
                                 if error_type not in details:
                                     details[error_type] = error_info
                                 else:
-                                    # Fusionner les informations d'erreur
+                                    # Merge error information
                                     if isinstance(error_info, list):
                                         if isinstance(details[error_type], list):
                                             details[error_type].extend(error_info)
@@ -525,28 +571,28 @@ def process_silver_to_gold():
                                         else:
                                             details[error_type] = error_info
                                     else:
-                                        # Pour les compteurs numériques, les additionner
+                                        # For numeric counters, add them
                                         if isinstance(details[error_type], (int, float)) and isinstance(error_info, (int, float)):
                                             details[error_type] += error_info
                                         else:
                                             details[error_type] = error_info
                                 
-                                # Ajouter le type d'erreur à la liste des colonnes en erreur
+                                # Add error type to the list of error columns
                                 if error_type not in cols_error:
                                     cols_error.append(error_type)
                         
-                        # Mettre à jour les compteurs
+                        # Update counters
                         rows_ko += v.get('rows_ko', 0)
                     
                     rows_ok = rows_total - rows_ko
                     
-                    # Déterminer le statut
+                    # Determine status
                     status = "OK" if rows_ko == 0 else "KO"
                     
-                    # Format de la date d'extraction (YYYY-MM-DD)
+                    # Extraction date format (YYYY-MM-DD)
                     extraction_date = brand_validations[0].get('extraction_date') if brand_validations else f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
                     
-                    # Insérer le log
+                    # Insert log
                     proc_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     cols_error_str = ','.join(cols_error) if cols_error else ''
                     
@@ -555,29 +601,43 @@ def process_silver_to_gold():
                     else:
                         insert_log_snowflake(proc_date, brand, extraction_date, table_name, rows_total, rows_ok, rows_ko, cols_error_str, status, details)
                 
-                # Ajouter les validations à la liste globale
+                # Add validations to global list
                 all_validations.extend(table_validations)
                     
             except Exception as e:
-                logger.error(f"Erreur lors de la fusion des données pour {table_name} à la date {file_date}: {e}")
+                logger.error(f"Error merging data for {table_name} on date {file_date}: {e}")
                 logger.error(traceback.format_exc())
                 success = False
     
-    # Retourner True si au moins une table a été traitée avec succès
+    # Clean up silver files if all processing was successful
+    if success and specific_date:
+        clean_silver_files(specific_date)
+    
+    # Return True if at least one table was processed successfully
     return success and len(all_validations) > 0
+
+# Parse command line arguments
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Process files from Silver layer to Gold layer")
+    parser.add_argument("--date", type=str, help="Specific date to process (YYYYMMDD format)")
+    return parser.parse_args()
 
 # Lambda handler
 def lambda_handler(event, context):
     """
-    Fonction handler pour AWS Lambda ou AWS Glue
+    Handler function for AWS Lambda or AWS Glue
     """
     logger.info("Lambda/Glue invocation started")
     try:
-        # Affichage de la configuration
+        # Display configuration
         log_config()
         
-        # Exécution du traitement
-        success = process_silver_to_gold()
+        # Get date from event if provided
+        date_to_process = event.get('date') if isinstance(event, dict) else None
+        
+        # Execute processing
+        success = process_silver_to_gold(date_to_process)
         
         response = {
             'statusCode': 200 if success else 500, 
@@ -603,7 +663,7 @@ def lambda_handler(event, context):
 # Main execution
 if __name__ == '__main__':
     try:
-        # Afficher les chemins pour le débogage
+        # Display paths for debugging
         print(f"BASE_DIR: {BASE_DIR}")
         print(f"DATA_DIR: {DATA_DIR}")
         print(f"SILVER_DIR: {SILVER_DIR}")
@@ -612,36 +672,44 @@ if __name__ == '__main__':
         
         logger.info("Starting SILVER to GOLD processing")
         
-        # Afficher la configuration
+        # Display configuration
         log_config()
         
-        # Enregistrer la date/heure de début
+        # Parse command line arguments
+        args = parse_args()
+        specific_date = args.date
+        
+        # Record start time
         start_time = datetime.now()
         logger.info(f"Process started at: {start_time}")
         
-        # Exécuter le traitement principal
-        success = process_silver_to_gold()
+        # Execute main processing
+        success = process_silver_to_gold(specific_date)
         
-        # Enregistrer la date/heure de fin et la durée
+        # Record end time and duration
         end_time = datetime.now()
         duration = end_time - start_time
         logger.info(f"Process completed at: {end_time}")
         logger.info(f"Total duration: {duration}")
         
-        # Afficher un résumé sur la console
-        print(f"\n=== RÉSUMÉ D'EXÉCUTION ===")
-        print(f"Démarré à    : {start_time}")
-        print(f"Terminé à    : {end_time}")
-        print(f"Durée totale : {duration}")
-        print(f"Statut       : {'SUCCÈS' if success else 'ÉCHEC'}")
-        print(f"Journal d'exécution : {log_file}")
-        print(f"===========================\n")
+        # Display summary on console
+        print(f"\n=== EXECUTION SUMMARY ===")
+        print(f"Started at   : {start_time}")
+        print(f"Finished at  : {end_time}")
+        print(f"Total duration: {duration}")
+        print(f"Status      : {'SUCCESS' if success else 'FAILURE'}")
+        print(f"Execution log: {log_file}")
+        print(f"=======================\n")
+        
+        # Exit with appropriate code
+        sys.exit(0 if success else 1)
         
     except Exception as e:
-        # Capture toutes les exceptions non traitées
-        logger.error(f"ERREUR CRITIQUE: {e}")
+        # Capture all unhandled exceptions
+        logger.error(f"CRITICAL ERROR: {e}")
         logger.error(traceback.format_exc())
-        print(f"\n[ERREUR CRITIQUE]")
-        print(f"Une erreur s'est produite pendant l'exécution:")
+        print(f"\n[CRITICAL ERROR]")
+        print(f"An error occurred during execution:")
         print(f"{str(e)}")
-        print(f"Consultez le journal pour plus de détails: {log_file}\n")
+        print(f"Check the log for details: {log_file}\n")
+        sys.exit(1)
