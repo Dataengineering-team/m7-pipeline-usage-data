@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-This script processes Parquet files from the gold layer and loads them into Snowflake.
-It supports date-specific processing, data validation, and enrichment with brand codes.
+This script processes Parquet files from the gold layer and loads them directly into Snowflake.
+It supports data validation, brand mapping, and column type conversions based on configuration files.
 """
 import os
-import io
-import csv
 import sys
 import uuid
 import json
-import re
 import logging
 import traceback
 import argparse
@@ -18,13 +15,6 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-import snowflake.connector
-import psutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# Add parent directory to path to allow importing utilities
-sys.path.append(str(Path(__file__).parent))
-from utils import file_utils, validation_utils
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,37 +22,25 @@ load_dotenv()
 # ===== CONFIG =====
 # Base paths
 BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
-
-# Handle relative vs absolute paths from .env
-data_dir_env = os.getenv('DATA_DIR')
-if data_dir_env:
-    # If path starts with ./ or is relative without slash, consider it relative to BASE_DIR
-    if data_dir_env.startswith('./') or not ('/' in data_dir_env or '\\' in data_dir_env):
-        DATA_DIR = BASE_DIR / data_dir_env.lstrip('./')
-    # Otherwise use the path as is (absolute)
-    else:
-        DATA_DIR = Path(data_dir_env)
-else:
-    # Default value if DATA_DIR is not defined
-    DATA_DIR = BASE_DIR / "data"
-
-# Define explicit paths relative to DATA_DIR
-GOLD_DIR = DATA_DIR / os.getenv('GOLD_SUBDIR', 'gold')
-LOGS_DIR = DATA_DIR / os.getenv('LOGS_SUBDIR', 'logs')
+DATA_DIR = BASE_DIR / "data"
+GOLD_DIR = DATA_DIR / "gold"
+LOGS_DIR = DATA_DIR / "logs"
 CONFIG_DIR = BASE_DIR / "config"
 
-# Convert paths to absolute for logging
-GOLD_DIR = GOLD_DIR.resolve()
-LOGS_DIR = LOGS_DIR.resolve()
-CONFIG_DIR = CONFIG_DIR.resolve()
+# Make sure log directory exists
+LOGS_DIR.mkdir(exist_ok=True, parents=True)
 
-# Processing parameters
-EXPECTED_TABLES = os.getenv('EXPECTED_TABLES', "Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended").split(',')
-MOCK_SNOWFLAKE = os.getenv('MOCK_SNOWFLAKE', 'true').lower() == 'true'
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-PARALLEL_PROCESSING = os.getenv('PARALLEL_PROCESSING', 'true').lower() == 'true'
-MAX_WORKERS = int(os.getenv('MAX_WORKERS', '4'))
-LOADED_BY = os.getenv('LOADED_BY', 'ETL_GOLD_TO_SNOWFLAKE')  # Identifier for the loading process
+# Configure logging
+log_file = LOGS_DIR / "gold_to_snowflake_execution.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Snowflake parameters
 SF_USER = os.getenv('SNOWFLAKE_USER')
@@ -72,21 +50,23 @@ SF_WHS = os.getenv('SNOWFLAKE_WAREHOUSE')
 SF_DB = os.getenv('SNOWFLAKE_DATABASE')
 SF_SCHEMA = os.getenv('SNOWFLAKE_SCHEMA', 'STG_SG')
 SF_MONITORING_SCHEMA = os.getenv('SNOWFLAKE_MONITORING_SCHEMA', 'STG_SG_MONITORING')
+LOADED_BY = os.getenv('LOADED_BY', 'ETL_GOLD_TO_SNOWFLAKE')
 
-# Ensure these directories exist
-LOGS_DIR.mkdir(exist_ok=True, parents=True)
+# Flag to run in mock mode (without actual Snowflake connections)
+MOCK_MODE = False
 
-# Configure logging
-log_file = LOGS_DIR / "gold_to_snowflake_execution.log"
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Table name mapping - from file name to Snowflake table name
+TABLE_NAME_MAPPING = {
+    "VODCatalog": "AGG_VOD_CATALOG",
+    "VODCatalogExtended": "AGG_VOD_CATALOG_EXTENDED"
+}
+
+# Special column treatment - fields that need special handling during load
+COLUMN_TYPE_CONVERSIONS = {
+    "AGG_VOD_CATALOG": {
+        "series_last_episode_date": lambda x: str(x) if x is not None else None
+    }
+}
 
 # Custom JSON Encoder class to handle serialization
 class CustomJSONEncoder(json.JSONEncoder):
@@ -107,27 +87,28 @@ class CustomJSONEncoder(json.JSONEncoder):
         except TypeError:
             return str(obj)
 
-# Display configuration at startup
-def log_config():
-    """Log the current configuration"""
-    config = {
-        "BASE_DIR": str(BASE_DIR),
-        "DATA_DIR": str(DATA_DIR),
-        "GOLD_DIR": str(GOLD_DIR),
-        "LOGS_DIR": str(LOGS_DIR),
-        "CONFIG_DIR": str(CONFIG_DIR),
-        "EXPECTED_TABLES": EXPECTED_TABLES,
-        "MOCK_SNOWFLAKE": MOCK_SNOWFLAKE,
-        "LOG_LEVEL": LOG_LEVEL,
-        "PARALLEL_PROCESSING": PARALLEL_PROCESSING,
-        "MAX_WORKERS": MAX_WORKERS,
-        "LOADED_BY": LOADED_BY
-    }
-    logger.info("Configuration:")
-    for key, value in config.items():
-        logger.info(f"  {key}: {value}")
+def get_snowflake_table_name(table_name):
+    """Get the correct Snowflake table name for a given table"""
+    # Use mapping if exists, otherwise use standard AGG_TABLENAME format
+    return TABLE_NAME_MAPPING.get(table_name, f"AGG_{table_name.upper()}")
 
-# Load configuration files
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Process files from Gold layer to Snowflake")
+    parser.add_argument("--date", type=str, help="Specific date to process (YYYYMMDD format)")
+    parser.add_argument("--mock", action="store_true", help="Run in mock mode without connecting to Snowflake")
+    parser.add_argument("--table", type=str, help="Process only a specific table")
+    return parser.parse_args()
+
+def extract_table_date(filename):
+    """Extract table name and date from filename"""
+    parts = filename.stem.split('_')
+    if len(parts) >= 2 and parts[-1].isdigit() and len(parts[-1]) == 8:
+        date = parts[-1]
+        table_name = '_'.join(parts[:-1])
+        return table_name, date
+    return None, None
+
 def load_config_files():
     """Load configuration files (brand_configs.json, table_schemas.json, validation_rules.json)"""
     configs = {}
@@ -164,21 +145,21 @@ def load_config_files():
     
     return configs
 
-# Function to extract table name and date from filename
-def parse_gold_filename(filename):
-    """
-    Extracts table name and date from Gold filename
-    Example: Device_20250416.parquet -> ('Device', '20250416')
-    """
-    parts = filename.stem.split('_')
-    if len(parts) >= 2 and parts[-1].isdigit() and len(parts[-1]) == 8:
-        date = parts[-1]
-        table_name = '_'.join(parts[:-1])
-        return table_name, date
-    
-    return None, None
+def get_table_columns(conn, schema, table):
+    """Get the list of columns for a Snowflake table"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"DESC TABLE {schema}.{table}")
+        # Column name is the first element in each row
+        columns = [row[0].upper() for row in cursor.fetchall()]
+        logger.info(f"Retrieved {len(columns)} columns from {schema}.{table}")
+        return columns
+    except Exception as e:
+        logger.error(f"Error retrieving columns for {schema}.{table}: {e}")
+        return []
+    finally:
+        cursor.close()
 
-# Function to enrich data with brand information
 def enrich_brand_data(df, brand_configs):
     """
     Enriches data with complete brand information based on configuration file
@@ -205,7 +186,6 @@ def enrich_brand_data(df, brand_configs):
     enriched_df = enriched_df.apply(map_brand, axis=1)
     return enriched_df
 
-# Generic validation function that uses rules from validation_rules.json
 def validate_data(df, table_name, validation_rules):
     """
     Validate data using rules defined in validation_rules.json
@@ -356,7 +336,74 @@ def validate_data(df, table_name, validation_rules):
     # Return unique error rows
     return errors, list(set(error_rows))
 
-# Function to insert logs in Snowflake
+def apply_schema_validations(df, table_name, schema_config):
+    """Apply schema validations from table_schemas.json"""
+    # If schema configuration exists for this table
+    if table_name in schema_config:
+        table_schema = schema_config[table_name]
+        logger.info(f"Applying schema validations for {table_name}")
+        
+        # Apply column type conversions
+        for column, column_type in table_schema.get('columns', {}).items():
+            if column in df.columns:
+                logger.info(f"Applying type conversion to {column}: {column_type}")
+                
+                # Convert based on specified type
+                if column_type == 'string':
+                    # Remplacer None/NaN par une chaîne vide pour éviter les problèmes de longueur
+                    df[column] = df[column].fillna('')
+                    df[column] = df[column].astype(str)
+                elif column_type == 'integer':
+                    df[column] = pd.to_numeric(df[column], errors='coerce')
+                elif column_type == 'float':
+                    df[column] = pd.to_numeric(df[column], errors='coerce', downcast='float')
+                elif column_type == 'boolean':
+                    df[column] = df[column].astype(bool)
+                elif column_type == 'date':
+                    # Valider les dates avant conversion
+                    try:
+                        # Convertir en dates avec gestion des erreurs
+                        df[column] = pd.to_datetime(df[column], errors='coerce')
+                        
+                        # Remplacer les dates invalides par NULL
+                        mask = pd.isna(df[column]) | (df[column].dt.year < 1900) | (df[column].dt.year > 2100)
+                        if mask.any():
+                            logger.warning(f"Found {mask.sum()} invalid dates in column {column}, replacing with NULL")
+                            df.loc[mask, column] = pd.NaT
+                    except Exception as e:
+                        logger.error(f"Error converting column {column} to date: {e}")
+                        # En cas d'erreur, conserver les valeurs originales
+                        pass
+    
+    return df
+
+def apply_column_conversions(df, table_name):
+    """Apply special conversions to specific columns based on table"""
+    sf_table_name = get_snowflake_table_name(table_name)
+    
+    if sf_table_name in COLUMN_TYPE_CONVERSIONS:
+        conversions = COLUMN_TYPE_CONVERSIONS[sf_table_name]
+        
+        for column, conversion_func in conversions.items():
+            if column in df.columns:
+                logger.info(f"Applying special conversion to column {column} in {table_name}")
+                df[column] = df[column].apply(conversion_func)
+    
+    return df
+
+def determine_key_columns(table_name):
+    """Determine key columns for deduplication"""
+    key_map = {
+        'User': ['UserId'],
+        'Device': ['UserId', 'Serial'],
+        'Smartcard': ['SmartcardId'],
+        'Playback': ['PlaySessionID'],
+        'EPG': ['broadcast_datetime', 'station_id'],
+        'VODCatalog': ['external_id'],
+        'VODCatalogExtended': ['external_id']
+    }
+    return key_map.get(table_name, [])
+
 def insert_gold_log(process_id, process_date, execution_start, execution_end, date_folder, 
                    table_name, brand, reseller, records_before_agg, records_after_agg, 
                    duplicates_removed, brands_aggregated, checks_total, checks_passed, 
@@ -373,7 +420,7 @@ def insert_gold_log(process_id, process_date, execution_start, execution_end, da
         aggregation_details_json = json.dumps(aggregation_details, cls=CustomJSONEncoder)
         loading_details_json = json.dumps(loading_details, cls=CustomJSONEncoder)
         
-        if MOCK_SNOWFLAKE:
+        if MOCK_MODE:
             # Local version for testing
             log_entry = {
                 "PROCESS_ID": str(process_id),
@@ -416,6 +463,8 @@ def insert_gold_log(process_id, process_date, execution_start, execution_end, da
             return True
         else:
             # Snowflake connection
+            import snowflake.connector
+            
             ctx = snowflake.connector.connect(
                 user=SF_USER,
                 password=SF_PWD,
@@ -426,10 +475,9 @@ def insert_gold_log(process_id, process_date, execution_start, execution_end, da
             )
             cs = ctx.cursor()
             
-            # Prepare SQL query
+            # Utiliser TO_VARIANT pour convertir les chaînes JSON en type VARIANT de Snowflake
             sql = f"""
-                INSERT INTO {SF_MONITORING_SCHEMA}.GOLD_LOGS
-                (
+                INSERT INTO {SF_MONITORING_SCHEMA}.GOLD_LOGS (
                     PROCESS_ID, PROCESS_DATE, EXECUTION_START, EXECUTION_END, 
                     DATE_FOLDER, TABLE_NAME, BRAND, RESELLER, 
                     RECORDS_BEFORE_AGG, RECORDS_AFTER_AGG, DUPLICATES_REMOVED, BRANDS_AGGREGATED, 
@@ -438,41 +486,27 @@ def insert_gold_log(process_id, process_date, execution_start, execution_end, da
                     SNOWFLAKE_ROWS_INSERTED, SNOWFLAKE_ROWS_UPDATED, SNOWFLAKE_ROWS_REJECTED, 
                     PROCESSING_TIME_MS, MEMORY_USAGE_MB, STATUS, ERROR_MESSAGE, 
                     BUSINESS_CHECKS_DETAILS, AGGREGATION_DETAILS, LOADING_DETAILS
-                )
-                VALUES (
-                    '{process_id}', 
-                    '{process_date}',
-                    '{execution_start}',
-                    '{execution_end}',
-                    '{date_folder}',
-                    '{table_name}',
-                    '{brand}',
-                    '{reseller if reseller else ''}',
-                    {records_before_agg},
-                    {records_after_agg},
-                    {duplicates_removed},
-                    {brands_aggregated},
-                    {checks_total},
-                    {checks_passed},
-                    {checks_failed},
-                    {checks_skipped},
-                    {records_valid},
-                    {records_warning},
-                    {records_error},
-                    {snowflake_rows_inserted},
-                    {snowflake_rows_updated},
-                    {snowflake_rows_rejected},
-                    {processing_time_ms},
-                    {memory_usage_mb if memory_usage_mb is not None else 'NULL'},
-                    '{status}',
-                    '{error_message if error_message else ''}',
-                    PARSE_JSON('{business_checks_json.replace("'", "''")}'),
-                    PARSE_JSON('{aggregation_details_json.replace("'", "''")}'),
-                    PARSE_JSON('{loading_details_json.replace("'", "''")}')
-                );
+                ) 
+                SELECT 
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    TO_VARIANT(%s), TO_VARIANT(%s), TO_VARIANT(%s)
             """
             
-            cs.execute(sql)
+            # Valeurs pour la requête
+            values = [
+                str(process_id), process_date, execution_start, execution_end,
+                date_folder, table_name, brand, reseller if reseller else '',
+                records_before_agg, records_after_agg, duplicates_removed, brands_aggregated,
+                checks_total, checks_passed, checks_failed, checks_skipped,
+                records_valid, records_warning, records_error,
+                snowflake_rows_inserted, snowflake_rows_updated, snowflake_rows_rejected,
+                processing_time_ms, memory_usage_mb, status, error_message if error_message else "",
+                business_checks_json, aggregation_details_json, loading_details_json
+            ]
+            
+            # Exécuter la requête SQL
+            cs.execute(sql, values)
             ctx.commit()
             logger.info(f"Log inserted in Snowflake for {table_name} {brand} {date_folder}")
             
@@ -484,30 +518,33 @@ def insert_gold_log(process_id, process_date, execution_start, execution_end, da
         logger.error(f"Error inserting log: {e}")
         logger.error(traceback.format_exc())
         return False
-
-# Function to load data into Snowflake
-def load_to_snowflake(df, table_name):
+    
+def load_to_snowflake_direct(df, table_name):
     """
-    Loads DataFrame data into the corresponding Snowflake table
-    Returns a tuple (inserted, updated, rejected)
+    Load DataFrame to Snowflake using write_pandas method with column mapping
     """
+    if MOCK_MODE:
+        logger.info(f"[MOCK] Would load {len(df)} rows to {table_name}")
+        return len(df), 0
+    
+    # Get the correct Snowflake table name
+    sf_table_name = get_snowflake_table_name(table_name)
+    logger.info(f"Loading to Snowflake table: {sf_table_name}")
+    
     try:
-        if MOCK_SNOWFLAKE:
-            # For testing, simulate loading
-            rows = len(df)
-            logger.info(f"[MOCK] Simulated loading of {rows} rows into table {table_name}")
-            # For testing, consider all rows as inserted
-            return rows, 0, 0
+        # Import the required module
+        try:
+            import snowflake.connector
+            from snowflake.connector.pandas_tools import write_pandas
+            logger.info("Successfully imported Snowflake modules")
+        except ImportError as e:
+            logger.error(f"Error importing Snowflake modules: {e}")
+            logger.error("Make sure you have installed the Snowflake connector with pandas support:")
+            logger.error("pip install 'snowflake-connector-python[pandas]'")
+            return 0, 0
         
-        # Target Snowflake table name
-        sf_table_name = f"AGG_{table_name.upper()}"
-        
-        # Convert DataFrame to CSV for loading
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False, quoting=csv.QUOTE_NONNUMERIC)
-        csv_buffer.seek(0)
-        
-        # Snowflake connection
+        # Connect to Snowflake
+        logger.info(f"Connecting to Snowflake: account={SF_ACCOUNT}, user={SF_USER}, warehouse={SF_WHS}, database={SF_DB}, schema={SF_SCHEMA}")
         conn = snowflake.connector.connect(
             user=SF_USER,
             password=SF_PWD,
@@ -517,112 +554,164 @@ def load_to_snowflake(df, table_name):
             schema=SF_SCHEMA
         )
         
-        try:
-            cursor = conn.cursor()
-            
-            # Create a temporary stage for loading
-            stage_name = f"TEMP_STAGE_{uuid.uuid4().hex}"
-            cursor.execute(f"CREATE TEMPORARY STAGE {stage_name}")
-            
-            # Determine available columns in target table
-            cursor.execute(f"DESCRIBE TABLE {SF_SCHEMA}.{sf_table_name}")
-            table_columns = [row[0].upper() for row in cursor.fetchall()]
-            
-            # Filter DataFrame to include only columns that exist in the table
-            columns_to_use = [col for col in df.columns if col.upper() in table_columns]
-            df_filtered = df[columns_to_use]
-            
-            # Recreate CSV with only existing columns
-            csv_buffer = io.StringIO()
-            df_filtered.to_csv(csv_buffer, index=False, quoting=csv.QUOTE_NONNUMERIC)
-            csv_buffer.seek(0)
-            
-            # Load data into stage
-            put_sql = f"PUT file://{csv_buffer} @{stage_name}"
-            cursor.execute(put_sql)
-            
-            # Determine target columns for COPY
-            columns_str = ", ".join([f'"{col.upper()}"' for col in columns_to_use])
-            
-            # Load data into table
-            copy_sql = f"""
-            COPY INTO {SF_SCHEMA}.{sf_table_name} ({columns_str})
-            FROM @{stage_name}
-            FILE_FORMAT = (TYPE = 'CSV' FIELD_OPTIONALLY_ENCLOSED_BY = '"' SKIP_HEADER = 1)
-            ON_ERROR = 'CONTINUE'
-            """
-            cursor.execute(copy_sql)
-            
-            # Get loading results
-            copy_results = cursor.fetchall()
-            rows_loaded = sum(int(row[3]) for row in copy_results) if copy_results else 0
-            errors = sum(int(row[4]) for row in copy_results) if copy_results else 0
-            
-            # In COPY mode, all correct rows are inserted
-            # (Snowflake will update if primary key already exists)
-            rows_inserted = rows_loaded
-            rows_updated = 0  # No distinction between insertion and update in COPY mode
-            
-            logger.info(f"Snowflake loading successful for {sf_table_name}: {rows_inserted} rows loaded, {errors} errors")
-            
-            return rows_inserted, rows_updated, errors
-            
-        finally:
-            # Clean up stage
-            try:
-                cursor.execute(f"DROP STAGE IF EXISTS {stage_name}")
-            except:
-                pass
-            
-            # Close connection
-            cursor.close()
-            conn.close()
+        # Log successful connection
+        logger.info("Successfully connected to Snowflake")
+        
+        # Get the list of columns from the target table
+        table_columns = get_table_columns(conn, SF_SCHEMA, sf_table_name)
+        
+        if not table_columns:
+            logger.error(f"Could not retrieve columns for {SF_SCHEMA}.{sf_table_name}")
+            return 0, 0
+        
+        # Filter DataFrame to only keep columns that exist in the target table
+        # Case-insensitive match - Snowflake stores column names in uppercase
+        common_columns = []
+        column_mapping = {}
+        
+        # Create mapping between DataFrame columns and Snowflake columns
+        for df_col in df.columns:
+            for sf_col in table_columns:
+                if df_col.upper() == sf_col:
+                    # Si le nom de colonne est 'Group', il s'agit d'un mot réservé dans Snowflake
+                    # Nous devons le traiter différemment
+                    if df_col.upper() == 'GROUP':
+                        # Pour GROUP, on doit utiliser un nom différent ou des guillemets
+                        if '"GROUP"' in table_columns:
+                            common_columns.append(df_col)
+                            column_mapping[df_col] = '"GROUP"'
+                            break
+                        else:
+                            # Ignorer cette colonne si la version avec guillemets n'est pas trouvée
+                            logger.warning(f"Skipping reserved keyword column: {df_col}")
+                            continue
+                    
+                    common_columns.append(df_col)
+                    column_mapping[df_col] = sf_col
+                    break
+        
+        if not common_columns:
+            logger.error(f"No common columns found between DataFrame and Snowflake table {sf_table_name}")
+            logger.info(f"DataFrame columns: {list(df.columns)}")
+            logger.info(f"Snowflake table columns: {table_columns}")
+            return 0, 0
+        
+        # Create a filtered DataFrame with only the common columns
+        filtered_df = df[common_columns].copy()
+        logger.info(f"Filtered DataFrame from {len(df.columns)} to {len(filtered_df.columns)} columns")
+        
+        # Apply special column conversions if needed
+        filtered_df = apply_column_conversions(filtered_df, table_name)
+        
+        # Remplacer les valeurs None par des chaînes vides pour éviter l'erreur de longueur
+        # dans les colonnes de type VARCHAR(2)
+        for col in filtered_df.columns:
+            if filtered_df[col].dtype == 'object' or pd.api.types.is_string_dtype(filtered_df[col]):
+                filtered_df[col] = filtered_df[col].fillna('')
+        
+        # Rename columns to match Snowflake's uppercase convention
+        filtered_df.columns = [column_mapping.get(col, col) for col in filtered_df.columns]
+        logger.info("Renamed DataFrame columns to match Snowflake's uppercase convention")
+        
+        # Use write_pandas to load data directly
+        logger.info(f"Using write_pandas to load {len(filtered_df)} rows to {sf_table_name}")
+        
+        # Execute the write_pandas function
+        success, num_chunks, num_rows, output = write_pandas(
+            conn=conn,
+            df=filtered_df,
+            table_name=sf_table_name,
+            database=SF_DB,
+            schema=SF_SCHEMA,
+            auto_create_table=False,
+            quote_identifiers=False
+        )
+        
+        # Log the results
+        logger.info(f"write_pandas results: success={success}, chunks={num_chunks}, rows={num_rows}")
+        
+        # If successful, return the number of rows loaded
+        if success:
+            logger.info(f"Successfully loaded {num_rows} rows to {sf_table_name}")
+            return num_rows, 0
+        else:
+            logger.error(f"Failed to load data to {sf_table_name}: {output}")
+            return 0, len(df)
         
     except Exception as e:
         logger.error(f"Error loading into Snowflake: {e}")
         logger.error(traceback.format_exc())
-        return 0, 0, len(df)
+        return 0, 0
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
-# Function to process a Gold file
 def process_gold_file(file_path, configs):
-    """
-    Processes a single Gold file and loads the data into Snowflake
-    """
+    """Process a single Gold file"""
+    start_time = datetime.now()
+    process_id = str(uuid.uuid4())
+    
     try:
-        start_time = datetime.now()
-        process_id = str(uuid.uuid4())
+        import psutil
         memory_start = psutil.Process().memory_info().rss / (1024 * 1024)  # In MB
-        
-        # Extract table name and date from filename
-        table_name, date_folder = parse_gold_filename(file_path)
-        
-        if not table_name or not date_folder:
+    except ImportError:
+        memory_start = 0
+        logger.warning("psutil module not available, memory usage tracking disabled")
+    
+    logger.info(f"Processing file: {file_path}")
+    
+    try:
+        # Extract table name and date
+        table_name, date_str = extract_table_date(file_path)
+        if not table_name or not date_str:
             logger.error(f"Invalid filename format: {file_path}")
             return False
         
-        logger.info(f"Processing file {file_path}: table={table_name}, date={date_folder}")
+        logger.info(f"Extracted table={table_name}, date={date_str}")
         
         # Read Parquet file
         df = pd.read_parquet(file_path)
-        records_before_agg = len(df)
+        logger.info(f"Read {len(df)} rows from Parquet file")
         
-        if records_before_agg == 0:
-            logger.warning(f"No data found in file {file_path}")
+        # Skip empty files
+        if len(df) == 0:
+            logger.warning(f"File {file_path} is empty, skipping")
             return False
+        
+        # Add LOADDATE and LOADEDBY columns
+        current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        df['LOADDATE'] = current_timestamp
+        df['LOADEDBY'] = LOADED_BY
+        
+        # Handle data types
+        for col in df.columns:
+            # Convert objects to strings
+            if df[col].dtype == 'object':
+                # Replace NaN with None
+                df[col] = df[col].where(pd.notna(df[col]), None)
+                # Convert non-None values to string
+                df[col] = df[col].apply(lambda x: str(x) if x is not None else None)
+            
+            # Handle datetime columns
+            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                # Vérifier et remplacer les dates invalides
+                invalid_dates_mask = (df[col].dt.year < 1900) | (df[col].dt.year > 2100)
+                if invalid_dates_mask.any():
+                    logger.warning(f"Found {invalid_dates_mask.sum()} invalid dates in column {col}, replacing with NULL")
+                    df.loc[invalid_dates_mask, col] = pd.NaT
+                
+                # Formater les dates valides
+                df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
         
         # Enrich data with brand information
         df = enrich_brand_data(df, configs.get('brands', {}))
-        
-        # Check if data contains BRAND column
-        if 'BRAND' not in df.columns:
-            logger.error(f"BRAND column missing in file {file_path}")
-            return False
         
         # Process by brand
         brands = df['BRAND'].unique()
         
         for brand in brands:
-            brand_df = df[df['BRAND'] == brand]
+            # Filter data for this brand
+            brand_df = df[df['BRAND'] == brand].copy()
             brand_records = len(brand_df)
             
             # Get brand code
@@ -633,16 +722,7 @@ def process_gold_file(file_path, configs):
                 brand_df = brand_df.drop(columns=['BRAND_CODE'])
             
             # Determine key columns for deduplication
-            key_map = {
-                'User': ['Userid'],
-                'Device': ['Userid', 'Serial'],
-                'Smartcard': ['SmartcardId'],
-                'Playback': ['PlaySessionID'],
-                'EPG': ['broadcast_datetime', 'station_id'],
-                'VODCatalog': ['external_id'],
-                'VODCatalogExtended': ['external_id']
-            }
-            key_columns = key_map.get(table_name, [])
+            key_columns = determine_key_columns(table_name)
             
             # Deduplicate data if key columns are defined
             duplicates_removed = 0
@@ -650,17 +730,23 @@ def process_gold_file(file_path, configs):
                 before_dedup = len(brand_df)
                 brand_df = brand_df.drop_duplicates(subset=key_columns, keep='first')
                 duplicates_removed = before_dedup - len(brand_df)
+                logger.info(f"Removed {duplicates_removed} duplicate rows using keys: {key_columns}")
             
             records_after_agg = len(brand_df)
+            
+            # Apply schema validations if available
+            brand_df = apply_schema_validations(brand_df, table_name, configs.get('schemas', {}))
             
             # Perform business validations using rules from JSON
             validation_errors, error_rows = validate_data(brand_df, table_name, configs.get('validations', {}))
             
             # Calculate validation statistics
-            checks_total = sum(1 for _ in validation_errors)
+            checks_total = sum(1 for _ in configs.get('validations', {}).get(table_name, {}))
             checks_failed = len(validation_errors)
             checks_passed = checks_total - checks_failed
+            checks_skipped = 0
             records_valid = records_after_agg - len(error_rows)
+            records_warning = 0
             
             # Prepare validation details for log
             business_checks_details = {
@@ -682,38 +768,28 @@ def process_gold_file(file_path, configs):
             # Load data into Snowflake
             execution_start = start_time.strftime('%Y-%m-%d %H:%M:%S')
             
-            # Normalize column names for Snowflake (if needed)
-            snowflake_df = brand_df.copy()
-            
-            # Add LOADDATE and LOADEDBY columns
-            current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            snowflake_df['LOADDATE'] = current_timestamp
-            snowflake_df['LOADEDBY'] = LOADED_BY  # Use global variable
-            
-            # Resolve potential typing issues for Snowflake
-            for col in snowflake_df.columns:
-                if snowflake_df[col].dtype == 'object':
-                    snowflake_df[col] = snowflake_df[col].astype(str)
-                elif pd.api.types.is_datetime64_any_dtype(snowflake_df[col]):
-                    snowflake_df[col] = snowflake_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Load into Snowflake
-            rows_inserted, rows_updated, rows_rejected = load_to_snowflake(snowflake_df, table_name)
+            # Load to Snowflake
+            rows_inserted, rows_rejected = load_to_snowflake_direct(brand_df, table_name)
             
             # Prepare loading details for log
             loading_details = {
                 "snowflake_rows_inserted": rows_inserted,
-                "snowflake_rows_updated": rows_updated,
+                "snowflake_rows_updated": 0,  # Not applicable with write_pandas
                 "snowflake_rows_rejected": rows_rejected,
-                "table_name": f"AGG_{table_name.upper()}"
+                "table_name": get_snowflake_table_name(table_name)
             }
             
             # Calculate performance metrics
             end_time = datetime.now()
             execution_end = end_time.strftime('%Y-%m-%d %H:%M:%S')
             processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
-            memory_end = psutil.Process().memory_info().rss / (1024 * 1024)  # In MB
-            memory_usage_mb = round(memory_end - memory_start, 2)
+            
+            try:
+                import psutil
+                memory_end = psutil.Process().memory_info().rss / (1024 * 1024)  # In MB
+                memory_usage_mb = round(memory_end - memory_start, 2)
+            except:
+                memory_usage_mb = 0
             
             # Insert log
             process_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -724,10 +800,10 @@ def process_gold_file(file_path, configs):
                 process_date=process_date,
                 execution_start=execution_start,
                 execution_end=execution_end,
-                date_folder=date_folder,
+                date_folder=date_str,
                 table_name=table_name,
-                brand=brand_code,  # Use brand code
-                reseller="",       # Empty field as not used anymore
+                brand=brand_code,
+                reseller="",  # Empty field as not used anymore
                 records_before_agg=brand_records,
                 records_after_agg=records_after_agg,
                 duplicates_removed=duplicates_removed,
@@ -735,12 +811,12 @@ def process_gold_file(file_path, configs):
                 checks_total=checks_total,
                 checks_passed=checks_passed,
                 checks_failed=checks_failed,
-                checks_skipped=0,
+                checks_skipped=checks_skipped,
                 records_valid=records_valid,
-                records_warning=0,
+                records_warning=records_warning,
                 records_error=len(error_rows),
                 snowflake_rows_inserted=rows_inserted,
-                snowflake_rows_updated=rows_updated,
+                snowflake_rows_updated=0,
                 snowflake_rows_rejected=rows_rejected,
                 processing_time_ms=processing_time_ms,
                 memory_usage_mb=memory_usage_mb,
@@ -751,7 +827,7 @@ def process_gold_file(file_path, configs):
                 loading_details=loading_details
             )
             
-            logger.info(f"Processing completed for {table_name} / {brand} / {date_folder} with status {status}")
+            logger.info(f"Processing completed for {table_name} / {brand_code} / {date_str} with status {status}")
         
         return True
         
@@ -760,178 +836,91 @@ def process_gold_file(file_path, configs):
         logger.error(traceback.format_exc())
         return False
 
-# Main processing function
-def process_gold_to_snowflake(specific_date=None):
-    """
-    Processes files from Gold layer to load them into Snowflake
+def process_gold_files(date_str=None, specific_table=None):
+    """Process all Gold files, optionally filtering by date and/or table"""
+    logger.info(f"Starting processing of Gold files" + 
+               (f" for date {date_str}" if date_str else "") +
+               (f" for table {specific_table}" if specific_table else ""))
     
-    Args:
-        specific_date: Optional date string in YYYYMMDD format to filter processing
-        
-    Returns:
-        Boolean indicating success
-    """
-    logger.info("Starting GOLD -> SNOWFLAKE processing")
-    if specific_date:
-        logger.info(f"Processing restricted to date: {specific_date}")
-    
-    # 1. Load configuration files
-    configs = load_config_files()
-    
-    # 2. List all Parquet files in Gold layer
     try:
-        # Define pattern based on specific_date
-        if specific_date:
-            gold_files = list(GOLD_DIR.glob(f'*_{specific_date}.parquet'))
+        # Load configuration files
+        configs = load_config_files()
+        
+        # Define file pattern
+        pattern = ""
+        if specific_table and date_str:
+            pattern = f"{specific_table}_{date_str}.parquet"
+        elif specific_table:
+            pattern = f"{specific_table}_*.parquet"
+        elif date_str:
+            pattern = f"*_{date_str}.parquet"
         else:
-            gold_files = list(GOLD_DIR.glob('*.parquet'))
+            pattern = "*.parquet"
             
+        # Find files
+        gold_files = list(GOLD_DIR.glob(pattern))
+        
         if not gold_files:
-            logger.warning(f"No Parquet files found in {GOLD_DIR}" + 
-                         (f" for date {specific_date}" if specific_date else ""))
+            logger.warning(f"No Gold files found matching pattern: {pattern}")
             return False
         
-        logger.info(f"Files found in Gold: {len(gold_files)}")
+        logger.info(f"Found {len(gold_files)} files to process")
+        for f in gold_files:
+            logger.info(f"  - {f.name}")
         
-        # 3. Process each Gold file
-        success = True
+        # Process each file
+        success_count = 0
+        for file_path in gold_files:
+            if process_gold_file(file_path, configs):
+                success_count += 1
         
-        if PARALLEL_PROCESSING and len(gold_files) > 1:
-            logger.info(f"Parallel processing of {len(gold_files)} files with {MAX_WORKERS} workers")
-            futures = {}
-            
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                # Submit tasks
-                for file_path in gold_files:
-                    future = executor.submit(process_gold_file, file_path, configs)
-                    futures[future] = file_path
-                
-                # Collect results
-                for future in as_completed(futures):
-                    file_path = futures[future]
-                    try:
-                        result = future.result()
-                        if not result:
-                            logger.warning(f"Processing failed for {file_path}")
-                            success = False
-                    except Exception as e:
-                        logger.error(f"Error in parallel processing of {file_path}: {e}")
-                        logger.error(traceback.format_exc())
-                        success = False
-        else:
-            logger.info(f"Sequential processing of {len(gold_files)} files")
-            for file_path in gold_files:
-                try:
-                    result = process_gold_file(file_path, configs)
-                    if not result:
-                        logger.warning(f"Processing failed for {file_path}")
-                        success = False
-                except Exception as e:
-                    logger.error(f"Error processing {file_path}: {e}")
-                    logger.error(traceback.format_exc())
-                    success = False
-    
+        logger.info(f"Processing completed: {success_count}/{len(gold_files)} files successful")
+        return success_count > 0
+        
     except Exception as e:
-        logger.error(f"Error during GOLD -> SNOWFLAKE processing: {e}")
+        logger.error(f"Error in process_gold_files: {e}")
         logger.error(traceback.format_exc())
         return False
+
+if __name__ == "__main__":
+    print("Starting gold_to_snowflake script")
     
-    return success
-
-# Parse command line arguments
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Process files from Gold layer to Snowflake")
-    parser.add_argument("--date", type=str, help="Specific date to process (YYYYMMDD format)")
-    return parser.parse_args()
-
-# Lambda handler
-def lambda_handler(event, context):
-    """
-    Handler function for AWS Lambda or AWS Glue
-    """
-    logger.info("Lambda/Glue invocation started")
     try:
-        # Display configuration
-        log_config()
-        
-        # Get date from event if provided
-        date_to_process = event.get('date') if isinstance(event, dict) else None
-        
-        # Execute processing
-        success = process_gold_to_snowflake(date_to_process)
-        
-        response = {
-            'statusCode': 200 if success else 500, 
-            'body': json.dumps({
-                'success': success,
-                'message': 'Processing completed successfully' if success else 'Processing failed'
-            })
-        }
-    except Exception as e:
-        logger.error(f"Lambda/Glue execution error: {e}")
-        logger.error(traceback.format_exc())
-        response = {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': str(e),
-                'message': 'Processing failed'
-            })
-        }
-    
-    logger.info(f"Lambda/Glue finished with response: {response}")
-    return response
-
-# Main execution
-if __name__ == '__main__':
-    try:
-        # Display paths for debugging
-        print(f"BASE_DIR: {BASE_DIR}")
-        print(f"DATA_DIR: {DATA_DIR}")
-        print(f"GOLD_DIR: {GOLD_DIR}")
-        print(f"LOGS_DIR: {LOGS_DIR}")
-        print(f"CONFIG_DIR: {CONFIG_DIR}")
-        
-        logger.info("Starting GOLD to SNOWFLAKE processing")
-        
-        # Display configuration
-        log_config()
-        
-        # Parse command line arguments
+        # Parse arguments
         args = parse_args()
-        specific_date = args.date
+        
+        # Set mock mode if requested
+        if args.mock:
+            MOCK_MODE = True
+            logger.info("Running in MOCK mode (no Snowflake connection)")
         
         # Record start time
         start_time = datetime.now()
         logger.info(f"Process started at: {start_time}")
         
-        # Execute main processing
-        success = process_gold_to_snowflake(specific_date)
+        # Process files with specific table if provided
+        success = process_gold_files(args.date, args.table)
         
-        # Record end time and duration
+        # Record end time
         end_time = datetime.now()
         duration = end_time - start_time
-        logger.info(f"Process completed at: {end_time}")
-        logger.info(f"Total duration: {duration}")
         
-        # Display summary on console
+        # Display summary
         print(f"\n=== EXECUTION SUMMARY ===")
         print(f"Started at   : {start_time}")
         print(f"Finished at  : {end_time}")
         print(f"Total duration: {duration}")
         print(f"Status      : {'SUCCESS' if success else 'FAILURE'}")
-        print(f"Execution log: {log_file}")
+        print(f"Mock mode   : {MOCK_MODE}")
+        print(f"Log file    : {log_file}")
         print(f"=======================\n")
         
         # Exit with appropriate code
         sys.exit(0 if success else 1)
         
     except Exception as e:
-        # Capture all unhandled exceptions
-        logger.error(f"CRITICAL ERROR: {e}")
+        logger.error(f"Critical error: {e}")
         logger.error(traceback.format_exc())
-        print(f"\n[CRITICAL ERROR]")
-        print(f"An error occurred during execution:")
-        print(f"{str(e)}")
-        print(f"Check the log for details: {log_file}\n")
+        print(f"\n[CRITICAL ERROR] {str(e)}")
+        print(f"Check log file: {log_file}")
         sys.exit(1)

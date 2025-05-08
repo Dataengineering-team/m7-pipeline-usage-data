@@ -1,0 +1,176 @@
+{
+    "User": {
+      "columns": {
+        "UserId": "string",
+        "Name": "string",
+        "Login": "string",
+        "Registered": "date",
+        "Expires": "date",
+        "ResellerId": "string",
+        "UserType": "string",
+        "Dunning": "integer",
+        "OptOutMarketingConsent": "string",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "UserSubscription": {
+      "columns": {
+        "Userid": "string",
+        "Subscription": "string",
+        "Brand": "string"
+      }
+    },
+    "Device": {
+      "columns": {
+        "UserId": "string",
+        "BoxType": "string",
+        "Serial": "string",
+        "Model": "string",
+        "OS": "string",
+        "App": "string",
+        "FirstActivity": "date",
+        "LastActivity": "date",
+        "OEM": "string",
+        "SubType": "string",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "Smartcard": {
+      "columns": {
+        "Userid": "string",
+        "SmartcardId": "string",
+        "Type": "string",
+        "Brand": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "Playback": {
+      "columns": {
+        "PlaySessionID": "string",
+        "PlayStartTime": "string",
+        "UserId": "string",
+        "SSOID": "string",
+        "AssetType": "string",
+        "AssetID": "string",
+        "AssetName": "string",
+        "AssetSolocooID": "string",
+        "AssetOwner": "string",
+        "AssetDuration": "integer",
+        "PlayDuration": "integer",
+        "PlayDurationExPause": "integer",
+        "PlaySerial": "string",
+        "PlayOfferId": "integer",
+        "PlayOfferName": "string",
+        "PlayOfferFrom": "string",
+        "PlayOfferTo": "string",
+        "PlaySubscription": "string",
+        "CommunityName": "string",
+        "DeviceMainType": "string",
+        "DeviceSubType": "string",
+        "ChannelName": "string",
+        "Date": "string",
+        "UserFlags": "integer",
+        "MemberId": "integer",
+        "IsKidsMember": "boolean",
+        "Protocol": "string",
+        "TVAPIAssetId": "string",
+        "SeriesTVAPIAssetId": "string",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "EPG": {
+      "columns": {
+        "channel_name": "string",
+        "program_title": "string",
+        "broadcast_datetime": "date",
+        "duration_seconds": "integer",
+        "country": "string",
+        "station_id": "integer",
+        "genres": "string",
+        "description": "string",
+        "formats": "string",
+        "series_externalid": "string",
+        "series_title": "string",
+        "season": "integer",
+        "episode": "integer",
+        "broadcast_localdatetime": "date",
+        "supergenres": "string",
+        "directors": "string",
+        "actors": "string",
+        "global_content_id": "integer",
+        "global_season_content_id": "integer",
+        "global_series_content_id": "integer",
+        "global_sporttournament_id": "integer",
+        "global_sportevent_id": "integer",
+        "global_series_sporttournament_id": "integer",
+        "minimum_age": "integer",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "VODCatalog": {
+      "columns": {
+        "external_id": "string",
+        "title": "string",
+        "owner": "string",
+        "countries": "string",
+        "duration": "integer",
+        "license_start": "date",
+        "license_end": "date",
+        "series_title": "string",
+        "series_external_id": "string",
+        "series_season": "string",
+        "series_episode": "integer",
+        "series_episode_count": "integer",
+        "series_last_episode_date": "string",
+        "requires_payment": "boolean",
+        "genres": "string",
+        "original_title": "string",
+        "directors": "string",
+        "actors": "string",
+        "season_episode_count": "integer",
+        "tvapi_asset_id": "string",
+        "audio_languages": "string",
+        "subtitle_languages": "string",
+        "description": "string",
+        "release_date": "date",
+        "series_tvapi_asset_id": "string",
+        "global_brand_id": "integer",
+        "global_parental_id": "integer",
+        "global_content_id": "integer",
+        "global_season_content_id": "integer",
+        "global_series_content_id": "integer",
+        "global_sporttournament_id": "integer",
+        "global_sportevent_id": "integer",
+        "global_series_sporttournament_id": "integer",
+        "isactive": "boolean",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    },
+    "VODCatalogExtended": {
+      "columns": {
+        "external_id": "string",
+        "title": "string",
+        "owner": "string",
+        "series_title": "string",
+        "series_externalid": "string",
+        "season": "integer",
+        "episode": "integer",
+        "series_episode_count": "integer",
+        "series_last_episode_date": "date",
+        "countries": "string",
+        "duration": "integer",
+        "license_start": "date",
+        "license_end": "date",
+        "requires_payment": "integer",
+        "Genres": "string",
+        "Group": "string",
+        "BRAND": "string",
+        "FILEDATE": "string"
+      }
+    }
+  }

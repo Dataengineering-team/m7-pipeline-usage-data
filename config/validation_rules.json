@@ -2,7 +2,7 @@
     "User": {
       "valid_types": {
         "column": "UserType",
-        "allowed_values": ["Trial", "Demo", "WebDemo", "Provisioned", "Anonymous"],
+        "allowed_values": ["Trial", "Demo", "WebDemo", "Provisioned", "Anonymous", "ManuallyCreated", "FreeVision"],
         "error_type": "invalid_user_types"
       },
       "required_fields": {
