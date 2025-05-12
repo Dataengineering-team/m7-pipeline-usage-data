@@ -1,0 +1,713 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ETL Pipeline Infrastructure for Data Processing (RAW to SILVER to GOLD to SNOWFLAKE)'
+
+Parameters:
+  Environment:
+    Description: Environment name (dev, test, prod)
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  
+  CodeBucketName:
+    Description: S3 bucket name for Lambda/Glue code deployment
+    Type: String
+    Default: m7-etl-code-repository
+  
+  DataBucketName:
+    Description: S3 bucket name for ETL data
+    Type: String
+    Default: m7-etl-data-bucket
+  
+  SnowflakeUser:
+    Description: Snowflake username
+    Type: String
+    Default: AWS_SNOWFLAKE
+    NoEcho: false
+  
+  SnowflakePassword:
+    Description: Snowflake password
+    Type: String
+    Default: Qazwsxedcrfv@00
+    NoEcho: true
+  
+  SnowflakeAccount:
+    Description: Snowflake account
+    Type: String
+    Default: eb15765.eu-west-1
+  
+  SnowflakeWarehouse:
+    Description: Snowflake warehouse
+    Type: String
+    Default: DATA_ANALYTICS_WAREHOUSE
+  
+  SnowflakeDatabase:
+    Description: Snowflake database
+    Type: String
+    Default: M7_DB_STG_DEV
+  
+  SnowflakeSchema:
+    Description: Snowflake schema
+    Type: String
+    Default: STG_SG
+  
+  SnowflakeMonitoringSchema:
+    Description: Snowflake monitoring schema
+    Type: String
+    Default: STG_SG_MONITORING
+  
+  GlueMemory:
+    Description: Memory allocation for Glue job (GB)
+    Type: Number
+    Default: 16
+    MinValue: 2
+    MaxValue: 64
+  
+  MaxWorkers:
+    Description: Maximum number of workers for parallel processing
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 10
+    
+  MaxDaysBack:
+    Description: Maximum number of days to look back
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 30
+
+  GoldRetentionDays:
+    Description: Number of days to keep gold files
+    Type: Number
+    Default: 30
+    MinValue: 0
+    MaxValue: 365
+
+Resources:
+  # IAM Roles
+  ETLLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ETLLambdaS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub arn:aws:s3:::${CodeBucketName}/*
+  
+  ETLGlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: ETLGlueS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub arn:aws:s3:::${CodeBucketName}/*
+  
+  # S3 Buckets
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref DataBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: GoldRetentionRule
+            Status: Enabled
+            Prefix: gold/
+            ExpirationInDays: !Ref GoldRetentionDays
+  
+  CodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref CodeBucketName
+      VersioningConfiguration:
+        Status: Enabled
+  
+  # Lambda Layers
+  ETLDependenciesLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: etl-dependencies
+      Description: Python dependencies for ETL (pandas, pyarrow, etc.)
+      CompatibleRuntimes:
+        - python3.11
+      Content:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: layers/etl-dependencies.zip
+  
+  # Lambda Functions
+  RawToSilverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-raw-to-silver-${Environment}
+      Runtime: python3.11
+      Handler: raw_to_silver.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 1024
+      Layers:
+        - !Ref ETLDependenciesLayer
+      Code:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: lambda/raw_to_silver.zip
+      Environment:
+        Variables:
+          DATA_DIR: /tmp/data
+          LANDING_SUBDIR: landing
+          RAW_SUBDIR: raw
+          SILVER_SUBDIR: silver
+          LOGS_SUBDIR: logs
+          DATA_BUCKET: !Ref DataBucketName
+          EXPECTED_TABLES: Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended
+          MOCK_SNOWFLAKE: "false"
+          LOG_LEVEL: INFO
+          DELETE_SOURCE_FILES_AFTER_LOAD: "false"
+          SNOWFLAKE_USER: !Ref SnowflakeUser
+          SNOWFLAKE_PASSWORD: !Ref SnowflakePassword
+          SNOWFLAKE_ACCOUNT: !Ref SnowflakeAccount
+          SNOWFLAKE_WAREHOUSE: !Ref SnowflakeWarehouse
+          SNOWFLAKE_DATABASE: !Ref SnowflakeDatabase
+          SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
+          SNOWFLAKE_MONITORING_SCHEMA: !Ref SnowflakeMonitoringSchema
+  
+  SilverToGoldFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-silver-to-gold-${Environment}
+      Runtime: python3.11
+      Handler: silver_to_gold.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 2048
+      Layers:
+        - !Ref ETLDependenciesLayer
+      Code:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: lambda/silver_to_gold.zip
+      Environment:
+        Variables:
+          DATA_DIR: /tmp/data
+          SILVER_SUBDIR: silver
+          GOLD_SUBDIR: gold
+          LOGS_SUBDIR: logs
+          CONFIG_DIR: /tmp/config
+          DATA_BUCKET: !Ref DataBucketName
+          EXPECTED_TABLES: Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended
+          MOCK_SNOWFLAKE: "false"
+          LOG_LEVEL: INFO
+          PARALLEL_PROCESSING: "true"
+          MAX_WORKERS: !Ref MaxWorkers
+          DELETE_SILVER_FILES_AFTER_LOAD: "false"
+          SNOWFLAKE_USER: !Ref SnowflakeUser
+          SNOWFLAKE_PASSWORD: !Ref SnowflakePassword
+          SNOWFLAKE_ACCOUNT: !Ref SnowflakeAccount
+          SNOWFLAKE_WAREHOUSE: !Ref SnowflakeWarehouse
+          SNOWFLAKE_DATABASE: !Ref SnowflakeDatabase
+          SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
+          SNOWFLAKE_MONITORING_SCHEMA: !Ref SnowflakeMonitoringSchema
+  
+  # Glue Job
+  GoldToSnowflakeJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub m7-gold-to-snowflake-${Environment}
+      Role: !GetAtt ETLGlueRole.Arn
+      GlueVersion: "4.0" # Latest as of May 2025
+      DefaultArguments:
+        "--enable-metrics": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub s3://${DataBucketName}/logs/spark-events
+        "--enable-job-insights": "true"
+        "--job-language": "python"
+        "--DATA_BUCKET": !Ref DataBucketName
+        "--DATA_DIR": "/tmp/data"
+        "--GOLD_SUBDIR": "gold"
+        "--LOGS_SUBDIR": "logs"
+        "--CONFIG_DIR": "/tmp/config"
+        "--EXPECTED_TABLES": "Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended"
+        "--MOCK_SNOWFLAKE": "false"
+        "--SNOWFLAKE_USER": !Ref SnowflakeUser
+        "--SNOWFLAKE_PASSWORD": !Ref SnowflakePassword
+        "--SNOWFLAKE_ACCOUNT": !Ref SnowflakeAccount
+        "--SNOWFLAKE_WAREHOUSE": !Ref SnowflakeWarehouse
+        "--SNOWFLAKE_DATABASE": !Ref SnowflakeDatabase
+        "--SNOWFLAKE_SCHEMA": !Ref SnowflakeSchema
+        "--SNOWFLAKE_MONITORING_SCHEMA": !Ref SnowflakeMonitoringSchema
+      Command:
+        Name: pythonshell
+        ScriptLocation: !Sub s3://${CodeBucketName}/glue/gold_to_snowflake.py
+        PythonVersion: "3"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 1
+      Timeout: 60  # In minutes
+      MaxCapacity: !Ref GlueMemory
+  
+  # Step Functions State Machine (Orchestration)
+  ETLStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub m7-etl-pipeline-${Environment}
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "ETL Pipeline for M7 Data Processing",
+          "StartAt": "RawToSilver",
+          "States": {
+            "RawToSilver": {
+              "Type": "Task",
+              "Resource": "${RawToSilverFunction.Arn}",
+              "Parameters": {
+                "date.$": "$.date"
+              },
+              "ResultPath": "$.RawToSilverResult",
+              "Next": "CheckRawToSilverStatus"
+            },
+            "CheckRawToSilverStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.RawToSilverResult.statusCode",
+                  "NumericEquals": 200,
+                  "Next": "SilverToGold"
+                }
+              ],
+              "Default": "FailState"
+            },
+            "SilverToGold": {
+              "Type": "Task",
+              "Resource": "${SilverToGoldFunction.Arn}",
+              "Parameters": {
+                "date.$": "$.date"
+              },
+              "ResultPath": "$.SilverToGoldResult",
+              "Next": "CheckSilverToGoldStatus"
+            },
+            "CheckSilverToGoldStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.SilverToGoldResult.statusCode",
+                  "NumericEquals": 200,
+                  "Next": "GoldToSnowflake"
+                }
+              ],
+              "Default": "FailState"
+            },
+            "GoldToSnowflake": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${GoldToSnowflakeJob}",
+                "Arguments": {
+                  "--date.$": "$.date"
+                }
+              },
+              "ResultPath": "$.GoldToSnowflakeResult",
+              "Next": "SuccessState"
+            },
+            "SuccessState": {
+              "Type": "Succeed"
+            },
+            "FailState": {
+              "Type": "Fail",
+              "Error": "ETLPipelineExecutionFailed",
+              "Cause": "One of the ETL steps failed"
+            }
+          }
+        }
+  
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsLambdaInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt RawToSilverFunction.Arn
+                  - !GetAtt SilverToGoldFunction.Arn
+              - Effect: Allow
+                Action:
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                Resource: "*"
+  
+  # S3 Event Notification to trigger pipeline
+  S3EventLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-s3-event-trigger-${Environment}
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt S3EventLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import re
+          
+          def handler(event, context):
+              # Get SFN ARN from environment
+              state_machine_arn = os.environ['STATE_MACHINE_ARN']
+              
+              # Extract bucket name and key from event
+              try:
+                  bucket = event['Records'][0]['s3']['bucket']['name']
+                  key = event['Records'][0]['s3']['object']['key']
+                  
+                  # Extract date from filename (assuming format *_YYYYMMDD.csv)
+                  date_match = re.search(r'_(\d{8})\.csv$', key)
+                  if date_match:
+                      date = date_match.group(1)
+                  else:
+                      date = None
+                      
+                  # Start the state machine
+                  client = boto3.client('stepfunctions')
+                  response = client.start_execution(
+                      stateMachineArn=state_machine_arn,
+                      input=json.dumps({
+                          "bucket": bucket,
+                          "key": key,
+                          "date": date
+                      })
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Pipeline triggered successfully!')
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f'Error triggering pipeline: {str(e)}')
+                  }
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref ETLStateMachine
+  
+  S3EventLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: StepFunctionsStartExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref ETLStateMachine
+  
+  S3EventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3EventLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${DataBucketName}
+  
+  # Lambda function for cleaning old files
+  MaintenanceLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-etl-maintenance-${Environment}
+      Runtime: python3.11
+      Handler: maintenance.handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 300  # 5 minutes
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          import boto3
+          import datetime
+          import os
+          
+          def handler(event, context):
+              # Get configuration from environment
+              data_bucket = os.environ['DATA_BUCKET']
+              gold_retention_days = int(os.environ.get('GOLD_RETENTION_DAYS', '30'))
+              
+              # Skip if retention is set to 0 (keep everything)
+              if gold_retention_days <= 0:
+                  print("Gold retention disabled, keeping all files")
+                  return {
+                      'statusCode': 200,
+                      'body': 'Maintenance skipped - retention disabled'
+                  }
+              
+              # Calculate cutoff date
+              today = datetime.datetime.now()
+              cutoff_date = today - datetime.timedelta(days=gold_retention_days)
+              cutoff_date_str = cutoff_date.strftime('%Y%m%d')
+              
+              # Initialize S3 client
+              s3 = boto3.client('s3')
+              
+              # List gold files
+              response = s3.list_objects_v2(
+                  Bucket=data_bucket,
+                  Prefix='gold/'
+              )
+              
+              if 'Contents' not in response:
+                  return {
+                      'statusCode': 200,
+                      'body': 'No gold files found'
+                  }
+              
+              # Filter and delete files older than cutoff date
+              deleted_count = 0
+              for obj in response['Contents']:
+                  key = obj['Key']
+                  # Extract date from filename (assuming TableName_YYYYMMDD.parquet format)
+                  if '_' in key and key.endswith('.parquet'):
+                      parts = key.split('_')
+                      if len(parts) >= 2 and parts[-1].endswith('.parquet'):
+                          file_date = parts[-1].replace('.parquet', '')
+                          if file_date.isdigit() and len(file_date) == 8 and file_date < cutoff_date_str:
+                              # Delete the file
+                              s3.delete_object(Bucket=data_bucket, Key=key)
+                              deleted_count += 1
+                              print(f"Deleted old gold file: {key}")
+              
+              return {
+                  'statusCode': 200,
+                  'body': f'Maintenance completed. Deleted {deleted_count} old gold files.'
+              }
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucketName
+          GOLD_RETENTION_DAYS: !Ref GoldRetentionDays
+  
+  # CloudWatch Event Rule for daily maintenance
+  MaintenanceSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub daily-etl-maintenance-${Environment}
+      Description: Triggers daily ETL maintenance functions
+      ScheduleExpression: cron(0 2 * * ? *)  # Run at 2 AM UTC every day
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt MaintenanceLambdaFunction.Arn
+          Id: MaintenanceLambdaTarget
+  
+  MaintenancePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MaintenanceLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MaintenanceSchedule.Arn
+
+  # CloudWatch Dashboard
+  ETLDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub m7-etl-pipeline-dashboard-${Environment}
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocations",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "Glue", "glue.driver.aggregate.numCompletedStages", "JobName", "${GoldToSnowflakeJob}", "JobRunId", "ALL" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Glue Job Stages Completed",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/States", "ExecutionsStarted", "StateMachineArn", "${ETLStateMachine}" ],
+                  [ ".", "ExecutionsSucceeded", ".", "." ],
+                  [ ".", "ExecutionsFailed", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Step Functions Executions",
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DataBucketName:
+    Description: Name of the S3 bucket for ETL data
+    Value: !Ref DataBucket
+  
+  CodeBucketName:
+    Description: Name of the S3 bucket for code artifacts
+    Value: !Ref CodeBucket
+  
+  RawToSilverFunctionArn:
+    Description: ARN of the Raw to Silver Lambda function
+    Value: !GetAtt RawToSilverFunction.Arn
+  
+  SilverToGoldFunctionArn:
+    Description: ARN of the Silver to Gold Lambda function
+    Value: !GetAtt SilverToGoldFunction.Arn
+  
+  GoldToSnowflakeJobName:
+    Description: Name of the Gold to Snowflake Glue job
+    Value: !Ref GoldToSnowflakeJob
+  
+  StateMachineArn:
+    Description: ARN of the ETL pipeline state machine
+    Value: !Ref ETLStateMachine
+  
+  CloudWatchDashboard:
+    Description: URL to the CloudWatch Dashboard
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ETLDashboard}
+  
+  S3EventTriggerFunction:
+    Description: ARN of the S3 event trigger Lambda function
+    Value: !GetAtt S3EventLambdaFunction.Arn
