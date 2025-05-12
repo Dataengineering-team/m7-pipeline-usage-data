@@ -13,6 +13,7 @@ import traceback
 import csv
 import argparse
 import sys
+import uuid
 from datetime import datetime
 import pandas as pd
 from pathlib import Path
@@ -63,6 +64,7 @@ SF_ACCOUNT = os.getenv('SNOWFLAKE_ACCOUNT')
 SF_WHS = os.getenv('SNOWFLAKE_WAREHOUSE')
 SF_DB = os.getenv('SNOWFLAKE_DATABASE')
 SF_SCHEMA = os.getenv('SNOWFLAKE_SCHEMA', 'MONITORING')
+SF_MONITORING_SCHEMA = os.getenv('SNOWFLAKE_MONITORING_SCHEMA', 'STG_SG_MONITORING')
 
 # Ensure these directories exist
 LANDING_DIR.mkdir(exist_ok=True, parents=True)
@@ -156,6 +158,7 @@ def insert_log_local(proc_date, brand, dt, details, status):
     """
     # Create a dictionary without complex objects to avoid serialization issues
     log_entry = {
+        "PROCESS_ID": str(uuid.uuid4()),
         "PROCESS_DATE": proc_date,
         "BRAND": brand,
         "EXTRACTION_DATE": dt,
@@ -198,42 +201,81 @@ def insert_log_snowflake(proc_date, brand, dt, details, status):
     try:
         import snowflake.connector
         
-        # Convert details to serializable JSON
-        details_json = json.dumps(details, cls=CustomJSONEncoder)
-        
+        # Connect to Snowflake
         ctx = snowflake.connector.connect(
             user=SF_USER,
             password=SF_PWD,
             account=SF_ACCOUNT,
             warehouse=SF_WHS,
             database=SF_DB,
-            schema=SF_SCHEMA
+            schema=SF_MONITORING_SCHEMA
         )
         cs = ctx.cursor()
-        jd = details_json.replace("'", "''")
+        
+        # Comptez le nombre de fichiers présents 
         cnt = details.get('files_present', 0)
+        
+        # Simplifier les détails pour les adapter dans un VARCHAR(4000)
+        simplified_details = {
+            "files_present": cnt,
+            "tables": {}
+        }
+        
+        # Ajouter une version simplifiée des informations de table
+        for table_name, table_info in details.get('details', {}).items():
+            simplified_details["tables"][table_name] = {
+                "status": table_info.get("status", "Unknown")
+            }
+            
+            # Ajouter des informations basiques sur la validation CSV si disponible
+            if "csv_validation" in table_info:
+                csv_validation = table_info["csv_validation"]
+                simplified_details["tables"][table_name]["csv_valid"] = csv_validation.get("valid", False)
+                
+        # Convertir en JSON et tronquer si nécessaire
+        json_details = json.dumps(simplified_details, cls=CustomJSONEncoder)
+        if len(json_details) > 4000:
+            logger.warning(f"Details JSON too large ({len(json_details)} chars), truncating to 4000 chars")
+            json_details = json_details[:3997] + "..."
+        
+        # Requête SQL sans PARSE_JSON car la colonne est VARCHAR
         sql = f"""
-            INSERT INTO {SF_SCHEMA}.RAW_LOGS
-                (PROCESS_DATE, BRAND, EXTRACTION_DATE, FILE_COUNT, STATUS, DETAILS)
+            INSERT INTO {SF_MONITORING_SCHEMA}.RAW_LOGS
+                (PROCESS_DATE, BRAND, EXTRACTION_DATE, FILE_COUNT, STATUS, DETAILS, RESELLER)
             VALUES (
-                TO_TIMESTAMP_NTZ('{proc_date}'),
-                '{brand}',
-                '{dt}',
-                {cnt},
-                '{status}',
-                '{jd}'
+                TO_TIMESTAMP_NTZ(%s), %s, %s, %s, %s, %s, %s
             );
         """
-        cs.execute(sql)
+        
+        # Ajout du paramètre RESELLER (vide si non disponible)
+        reseller = ""  # Valeur par défaut vide
+        
+        # Paramètres avec RESELLER inclus
+        params = (
+            proc_date,      # PROCESS_DATE
+            brand,          # BRAND
+            dt,             # EXTRACTION_DATE
+            cnt,            # FILE_COUNT
+            status,         # STATUS
+            json_details,   # DETAILS (format JSON standard)
+            reseller        # RESELLER (vide par défaut)
+        )
+        
+        cs.execute(sql, params)
         ctx.commit()
         logger.info(f"Inserted log for {brand} {dt} status={status}")
+        
+        return True
     except Exception as e:
         logger.error(f"Snowflake log error: {e}")
         logger.error(traceback.format_exc())
+        return False
     finally:
         try:
-            cs.close()
-            ctx.close()
+            if 'cs' in locals():
+                cs.close()
+            if 'ctx' in locals():
+                ctx.close()
         except Exception:
             pass
 
@@ -381,7 +423,12 @@ def process_and_convert(specific_date=None):
                 # Validate CSV before processing
                 csv_validation = validate_csv(src_file)
                 if not csv_validation['valid']:
-                    raise ValueError(f"Invalid CSV format: {csv_validation.get('error', 'Unknown error')}")
+                    logger.error(f"Invalid CSV format: {csv_validation.get('error', 'Unknown error')}")
+                    detail['details'][tbl]['csv_validation'] = {
+                        'valid': False,
+                        'error': csv_validation.get('error', 'Unknown error')
+                    }
+                    continue
                 
                 # Store validation information in details
                 # Store only simplified information to avoid serialization issues
@@ -411,16 +458,22 @@ def process_and_convert(specific_date=None):
                 
                 # Use the detected delimiter
                 delimiter = csv_validation.get('delimiter', ',')
-                df = pd.read_csv(dest_csv, sep=delimiter)
                 
-                # Parquet filename is the same but with .parquet extension
-                parquet_filename = f"{fn[:-4]}.parquet"
-                dest_parquet = silver_dest_dir / parquet_filename
-                
-                # Write the Parquet
-                df.to_parquet(dest_parquet, index=False)
-                detail['details'][tbl]['parquet_key'] = str(dest_parquet)
-                logger.info(f"Parquet written to {dest_parquet}")
+                try:
+                    df = pd.read_csv(dest_csv, sep=delimiter)
+                    
+                    # Parquet filename is the same but with .parquet extension
+                    parquet_filename = f"{fn[:-4]}.parquet"
+                    dest_parquet = silver_dest_dir / parquet_filename
+                    
+                    # Write the Parquet
+                    df.to_parquet(dest_parquet, index=False)
+                    detail['details'][tbl]['parquet_key'] = str(dest_parquet)
+                    logger.info(f"Parquet written to {dest_parquet}")
+                except Exception as e:
+                    logger.error(f"Error converting {fn} to Parquet: {e}")
+                    logger.error(traceback.format_exc())
+                    detail['details'][tbl]['parquet_error'] = str(e)
                 
             except Exception as e:
                 logger.error(f"Error processing {fn}: {e}")
@@ -429,7 +482,8 @@ def process_and_convert(specific_date=None):
                 detail['details'][tbl]['traceback'] = str(traceback.format_exc())
         
         # Determine status: OK if all expected present, otherwise Partial
-        status = 'OK' if all(detail['details'].get(tbl, {}).get('status') == 'OK' for tbl in EXPECTED_TABLES) else 'Partial'
+        expected_in_this_brand = [tbl for tbl in EXPECTED_TABLES if detail['details'].get(tbl, {}).get('status') == 'OK']
+        status = 'OK' if len(expected_in_this_brand) == len(EXPECTED_TABLES) else 'Partial'
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # Log insertion (local or Snowflake)
@@ -486,6 +540,7 @@ def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Process CSV files from landing to raw/silver layers")
     parser.add_argument("--date", type=str, help="Specific date to process (YYYYMMDD format)")
+    parser.add_argument("--mock", action="store_true", help="Run in mock mode without connecting to Snowflake")
     return parser.parse_args()
 
 # Lambda handler
@@ -507,7 +562,7 @@ def lambda_handler(event, context):
             'statusCode': 200, 
             'body': json.dumps({
                 'files_moved': moved,
-                'message': 'Processing completed successfully'
+                'message': 'Processing completed succeully'
             })
         }
     except Exception as e:
@@ -527,6 +582,14 @@ def lambda_handler(event, context):
 # Main execution
 if __name__ == '__main__':
     try:
+        # Parse arguments
+        args = parse_args()
+        
+        # Set mock mode if requested
+        if args.mock:
+            MOCK_SNOWFLAKE = True
+            logger.info("Running in MOCK mode (no Snowflake connection)")
+        
         # Display paths for debugging
         print(f"BASE_DIR: {BASE_DIR}")
         print(f"DATA_DIR: {DATA_DIR}")
@@ -540,8 +603,7 @@ if __name__ == '__main__':
         # Display configuration
         log_config()
         
-        # Parse command line arguments
-        args = parse_args()
+        # Specific date from arguments
         specific_date = args.date
         
         # Record start time

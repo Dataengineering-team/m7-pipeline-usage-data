@@ -71,7 +71,7 @@ class Config:
             'raw_retention_days': int(os.getenv('RAW_RETENTION_DAYS', '0')),
             'parallel_processing': os.getenv('PARALLEL_PROCESSING', 'true').lower() == 'true',
             'max_workers': int(os.getenv('MAX_WORKERS', '4')),
-            'mock_snowflake': os.getenv('MOCK_SNOWFLAKE', 'false').lower() == 'true'
+            'mock_snowflake': os.getenv('MOCK_SNOWFLAKE', 'false').lower() == 'true',
         }
         
         # Paramètres de journalisation
