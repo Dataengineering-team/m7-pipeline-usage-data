@@ -1,0 +1,724 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ETL Pipeline Infrastructure pour le traitement des données (RAW to SILVER to GOLD to SNOWFLAKE) avec MWAA'
+
+Parameters:
+  Environment:
+    Description: Nom de l'environnement (dev, test, prod)
+    Type: String
+    Default: test
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  
+  CodeBucketName:
+    Description: Nom du bucket S3 pour les déploiements de code (Lambda/Glue/Airflow)
+    Type: String
+    Default: m7-solocco-code-repository-test
+  
+  DataBucketName:
+    Description: Nom du bucket S3 pour les données ETL
+    Type: String
+    Default: m7-etl-data-solocco-test
+  
+  SnowflakeUser:
+    Description: Nom d'utilisateur Snowflake
+    Type: String
+    Default: AWS_SNOWFLAKE
+    NoEcho: false
+  
+  SnowflakePassword:
+    Description: Mot de passe Snowflake
+    Type: String
+    NoEcho: true
+  
+  SnowflakeAccount:
+    Description: Compte Snowflake
+    Type: String
+    Default: eb15765.eu-west-1
+  
+  SnowflakeWarehouse:
+    Description: Entrepôt Snowflake
+    Type: String
+    Default: DATA_ANALYTICS_WAREHOUSE
+  
+  SnowflakeDatabase:
+    Description: Base de données Snowflake
+    Type: String
+    Default: M7_DB_STG_DEV
+  
+  SnowflakeSchema:
+    Description: Schéma Snowflake
+    Type: String
+    Default: STG_SG
+  
+  SnowflakeMonitoringSchema:
+    Description: Schéma de monitoring Snowflake
+    Type: String
+    Default: STG_SG_MONITORING
+  
+  GlueMemory:
+    Description: Allocation mémoire pour le job Glue (GB)
+    Type: Number
+    Default: 16
+    MinValue: 2
+    MaxValue: 64
+  
+  MaxWorkers:
+    Description: Nombre maximal de workers pour le traitement parallèle
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 10
+    
+  MaxDaysBack:
+    Description: Nombre maximal de jours à examiner en arrière
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 30
+
+  GoldRetentionDays:
+    Description: Nombre de jours à conserver les fichiers gold
+    Type: Number
+    Default: 30
+    MinValue: 0
+    MaxValue: 365
+    
+  MWAAEnvironmentClass:
+    Description: Classe d'environnement MWAA
+    Type: String
+    Default: mw1.small
+    AllowedValues:
+      - mw1.small
+      - mw1.medium
+      - mw1.large
+
+Resources:
+  # IAM Roles
+  ETLLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ETLLambdaS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub arn:aws:s3:::${CodeBucketName}/*
+  
+  ETLGlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: ETLGlueS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub arn:aws:s3:::${CodeBucketName}/*
+  
+  # MWAA Execution Role
+  MWAAExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: airflow.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonMWAAServiceRolePolicy
+      Policies:
+        - PolicyName: MWAAExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt RawToSilverFunction.Arn
+                  - !GetAtt SilverToGoldFunction.Arn
+                  - !GetAtt MaintenanceLambdaFunction.Arn
+              - Effect: Allow
+                Action:
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:BatchStopJobRun
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+                  - !Sub arn:aws:s3:::${CodeBucketName}
+                  - !Sub arn:aws:s3:::${CodeBucketName}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                  - logs:PutLogEvents
+                  - logs:GetLogEvents
+                  - logs:GetLogRecord
+                  - logs:GetLogGroupFields
+                  - logs:GetQueryResults
+                Resource: 
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:airflow-m7-etl-mwaa-${Environment}*
+  
+  # S3 Buckets - référencer les buckets existants au lieu de les créer
+  # Note: Les buckets étant déjà créés, nous ne définissons pas de ressources S3::Bucket
+  
+  # Lambda Layers
+  ETLDependenciesLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub etl-dependencies-${Environment}
+      Description: Dépendances Python pour ETL (pandas, pyarrow, etc.)
+      CompatibleRuntimes:
+        - python3.11
+      Content:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: layers/etl-dependencies.zip
+  
+  # Lambda Functions
+  RawToSilverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-raw-to-silver-${Environment}
+      Runtime: python3.11
+      Handler: raw_to_silver.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 1024
+      Layers:
+        - !Ref ETLDependenciesLayer
+      Code:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: lambda/raw_to_silver.zip
+      Environment:
+        Variables:
+          DATA_DIR: /tmp/data
+          LANDING_SUBDIR: landing
+          RAW_SUBDIR: raw
+          SILVER_SUBDIR: silver
+          LOGS_SUBDIR: logs
+          DATA_BUCKET: !Ref DataBucketName
+          EXPECTED_TABLES: Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended
+          MOCK_SNOWFLAKE: "false"
+          LOG_LEVEL: INFO
+          DELETE_SOURCE_FILES_AFTER_LOAD: "false"
+          SNOWFLAKE_USER: !Ref SnowflakeUser
+          SNOWFLAKE_PASSWORD: !Ref SnowflakePassword
+          SNOWFLAKE_ACCOUNT: !Ref SnowflakeAccount
+          SNOWFLAKE_WAREHOUSE: !Ref SnowflakeWarehouse
+          SNOWFLAKE_DATABASE: !Ref SnowflakeDatabase
+          SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
+          SNOWFLAKE_MONITORING_SCHEMA: !Ref SnowflakeMonitoringSchema
+  
+  SilverToGoldFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-silver-to-gold-${Environment}
+      Runtime: python3.11
+      Handler: silver_to_gold.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 2048
+      Layers:
+        - !Ref ETLDependenciesLayer
+      Code:
+        S3Bucket: !Ref CodeBucketName
+        S3Key: lambda/silver_to_gold.zip
+      Environment:
+        Variables:
+          DATA_DIR: /tmp/data
+          SILVER_SUBDIR: silver
+          GOLD_SUBDIR: gold
+          LOGS_SUBDIR: logs
+          CONFIG_DIR: /tmp/config
+          DATA_BUCKET: !Ref DataBucketName
+          EXPECTED_TABLES: Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended
+          MOCK_SNOWFLAKE: "false"
+          LOG_LEVEL: INFO
+          PARALLEL_PROCESSING: "true"
+          MAX_WORKERS: !Ref MaxWorkers
+          DELETE_SILVER_FILES_AFTER_LOAD: "false"
+          SNOWFLAKE_USER: !Ref SnowflakeUser
+          SNOWFLAKE_PASSWORD: !Ref SnowflakePassword
+          SNOWFLAKE_ACCOUNT: !Ref SnowflakeAccount
+          SNOWFLAKE_WAREHOUSE: !Ref SnowflakeWarehouse
+          SNOWFLAKE_DATABASE: !Ref SnowflakeDatabase
+          SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
+          SNOWFLAKE_MONITORING_SCHEMA: !Ref SnowflakeMonitoringSchema
+  
+  # Glue Job
+  GoldToSnowflakeJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub m7-gold-to-snowflake-${Environment}
+      Role: !GetAtt ETLGlueRole.Arn
+      GlueVersion: "4.0" # Latest as of May 2025
+      DefaultArguments:
+        "--enable-metrics": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub s3://${DataBucketName}/logs/spark-events
+        "--enable-job-insights": "true"
+        "--job-language": "python"
+        "--DATA_BUCKET": !Ref DataBucketName
+        "--DATA_DIR": "/tmp/data"
+        "--GOLD_SUBDIR": "gold"
+        "--LOGS_SUBDIR": "logs"
+        "--CONFIG_DIR": "/tmp/config"
+        "--EXPECTED_TABLES": "Device,EPG,Playback,User,Smartcard,VODCatalog,VODCatalogExtended"
+        "--MOCK_SNOWFLAKE": "false"
+        "--SNOWFLAKE_USER": !Ref SnowflakeUser
+        "--SNOWFLAKE_PASSWORD": !Ref SnowflakePassword
+        "--SNOWFLAKE_ACCOUNT": !Ref SnowflakeAccount
+        "--SNOWFLAKE_WAREHOUSE": !Ref SnowflakeWarehouse
+        "--SNOWFLAKE_DATABASE": !Ref SnowflakeDatabase
+        "--SNOWFLAKE_SCHEMA": !Ref SnowflakeSchema
+        "--SNOWFLAKE_MONITORING_SCHEMA": !Ref SnowflakeMonitoringSchema
+      Command:
+        Name: pythonshell
+        ScriptLocation: !Sub s3://${CodeBucketName}/glue/gold_to_snowflake.py
+        PythonVersion: "3"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 1
+      Timeout: 60  # En minutes
+      MaxCapacity: !Ref GlueMemory
+  
+  # S3 Event Notification to trigger pipeline
+  S3EventLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-s3-event-trigger-${Environment}
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt S3EventLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import re
+          from datetime import datetime
+          
+          def handler(event, context):
+              # Extract bucket name and key from event
+              try:
+                  bucket = event['Records'][0]['s3']['bucket']['name']
+                  key = event['Records'][0]['s3']['object']['key']
+                  
+                  # Extract date from filename (assuming format *_YYYYMMDD.csv)
+                  date_match = re.search(r'_(\d{8})\.csv$', key)
+                  if date_match:
+                      date = date_match.group(1)
+                  else:
+                      # Try to get date from folder path structure
+                      folder_date_match = re.search(r'/(\d{8})/', key)
+                      if folder_date_match:
+                          date = folder_date_match.group(1)
+                      else:
+                          # Use current date as fallback
+                          date = datetime.now().strftime('%Y%m%d')
+                  
+                  # Initialize MWAA client
+                  client = boto3.client('mwaa')
+                  
+                  # Trigger DAG in Airflow
+                  response = client.create_cli_token(
+                      Name=os.environ['MWAA_ENV_NAME']
+                  )
+                  
+                  # Create CLI command to trigger DAG with config
+                  dag_name = os.environ['DAG_NAME']
+                  command = f"dags trigger {dag_name} -c '{json.dumps({'date': date, 'bucket': bucket, 'key': key})}'"
+                  
+                  # Execute command with CLI token
+                  mwaa_response = client.execute_cli_command(
+                      Name=os.environ['MWAA_ENV_NAME'],
+                      CliToken=response['CliToken'],
+                      CliCommand=command
+                  )
+                  
+                  print(f"MWAA CLI response: {mwaa_response}")
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Pipeline triggered successfully!')
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f'Error triggering pipeline: {str(e)}')
+                  }
+      Environment:
+        Variables:
+          MWAA_ENV_NAME: !Ref MWAAEnvironment
+          DAG_NAME: m7_etl_pipeline
+  
+  S3EventLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MWAAInvokePermission
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - mwaa:CreateCliToken
+                  - mwaa:ExecuteCliCommand
+                Resource: !Sub arn:aws:mwaa:${AWS::Region}:${AWS::AccountId}:environment/${MWAAEnvironment}
+        - PolicyName: S3AccessPermission
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+  
+  S3EventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3EventLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${DataBucketName}
+  
+  # Lambda function for cleaning old files
+  MaintenanceLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub m7-etl-maintenance-${Environment}
+      Runtime: python3.11
+      Handler: maintenance.handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 300  # 5 minutes
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          import boto3
+          import datetime
+          import os
+          
+          def handler(event, context):
+              # Get configuration from environment
+              data_bucket = os.environ['DATA_BUCKET']
+              gold_retention_days = int(os.environ.get('GOLD_RETENTION_DAYS', '30'))
+              
+              # Skip if retention is set to 0 (keep everything)
+              if gold_retention_days <= 0:
+                  print("Gold retention disabled, keeping all files")
+                  return {
+                      'statusCode': 200,
+                      'body': 'Maintenance skipped - retention disabled'
+                  }
+              
+              # Calculate cutoff date
+              today = datetime.datetime.now()
+              cutoff_date = today - datetime.timedelta(days=gold_retention_days)
+              cutoff_date_str = cutoff_date.strftime('%Y%m%d')
+              
+              # Initialize S3 client
+              s3 = boto3.client('s3')
+              
+              # List gold files
+              response = s3.list_objects_v2(
+                  Bucket=data_bucket,
+                  Prefix='gold/'
+              )
+              
+              if 'Contents' not in response:
+                  return {
+                      'statusCode': 200,
+                      'body': 'No gold files found'
+                  }
+              
+              # Filter and delete files older than cutoff date
+              deleted_count = 0
+              for obj in response['Contents']:
+                  key = obj['Key']
+                  # Extract date from filename (assuming TableName_YYYYMMDD.parquet format)
+                  if '_' in key and key.endswith('.parquet'):
+                      parts = key.split('_')
+                      if len(parts) >= 2 and parts[-1].endswith('.parquet'):
+                          file_date = parts[-1].replace('.parquet', '')
+                          if file_date.isdigit() and len(file_date) == 8 and file_date < cutoff_date_str:
+                              # Delete the file
+                              s3.delete_object(Bucket=data_bucket, Key=key)
+                              deleted_count += 1
+                              print(f"Deleted old gold file: {key}")
+              
+              return {
+                  'statusCode': 200,
+                  'body': f'Maintenance completed. Deleted {deleted_count} old gold files.'
+              }
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucketName
+          GOLD_RETENTION_DAYS: !Ref GoldRetentionDays
+  
+  # Security group pour MWAA
+  MWAASecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for MWAA environment
+      VpcId: !ImportValue VPC  # Assurez-vous que cette valeur existe dans vos exportations
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+  
+  # MWAA Environment
+  MWAAEnvironment:
+    Type: AWS::MWAA::Environment
+    Properties:
+      Name: !Sub m7-etl-mwaa-${Environment}
+      AirflowVersion: "2.8.1"  # Version d'Airflow la plus récente disponible
+      EnvironmentClass: !Ref MWAAEnvironmentClass
+      ExecutionRoleArn: !GetAtt MWAAExecutionRole.Arn
+      SourceBucketArn: !Sub arn:aws:s3:::${CodeBucketName}
+      DagS3Path: dags
+      RequirementsS3Path: requirements/requirements.txt  # Assurez-vous de télécharger ce fichier
+      NetworkConfiguration:
+        SecurityGroupIds:
+          - !GetAtt MWAASecurityGroup.GroupId
+        SubnetIds:
+          - !ImportValue PrivateSubnet1  # Assurez-vous que cette valeur existe dans vos exportations
+          - !ImportValue PrivateSubnet2  # Assurez-vous que cette valeur existe dans vos exportations
+      LoggingConfiguration:
+        DagProcessingLogs:
+          Enabled: true
+          LogLevel: INFO
+        SchedulerLogs:
+          Enabled: true
+          LogLevel: INFO
+        TaskLogs:
+          Enabled: true
+          LogLevel: INFO
+        WebserverLogs:
+          Enabled: true
+          LogLevel: INFO
+        WorkerLogs:
+          Enabled: true
+          LogLevel: INFO
+      MaxWorkers: !Ref MaxWorkers
+      AirflowConfigurationOptions:
+        "core.load_default_connections": "false"
+        "core.load_examples": "false"
+        "scheduler.min_file_process_interval": "30"  # Secondes entre chaque scan du dossier DAG
+        "scheduler.dag_dir_list_interval": "30"  # Secondes entre chaque liste du dossier DAG
+      WeeklyMaintenanceWindowStart: "SAT:03:00"  # Planifier la maintenance le samedi à 3h du matin
+
+  # CloudWatch Dashboard
+  ETLDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub m7-etl-pipeline-dashboard-${Environment}
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocations",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${RawToSilverFunction}" ],
+                  [ "...", "${SilverToGoldFunction}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "Glue", "glue.driver.aggregate.numCompletedStages", "JobName", "${GoldToSnowflakeJob}", "JobRunId", "ALL" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Glue Job Stages Completed",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AmazonMWAA", "SchedulerHeartbeat", "Environment", "${MWAAEnvironment}" ],
+                  [ ".", "TasksPending", ".", "." ],
+                  [ ".", "TasksRunning", ".", "." ],
+                  [ ".", "TasksSucceeded", ".", "." ],
+                  [ ".", "TasksFailed", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "MWAA Tasks Status",
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DataBucketName:
+    Description: Nom du bucket S3 pour les données ETL
+    Value: !Ref DataBucketName
+  
+  CodeBucketName:
+    Description: Nom du bucket S3 pour les artefacts de code
+    Value: !Ref CodeBucketName
+  
+  RawToSilverFunctionArn:
+    Description: ARN de la fonction Lambda Raw to Silver
+    Value: !GetAtt RawToSilverFunction.Arn
+  
+  SilverToGoldFunctionArn:
+    Description: ARN de la fonction Lambda Silver to Gold
+    Value: !GetAtt SilverToGoldFunction.Arn
+  
+  GoldToSnowflakeJobName:
+    Description: Nom du job Glue Gold to Snowflake
+    Value: !Ref GoldToSnowflakeJob
+  
+  MWAAEnvironmentName:
+    Description: Nom de l'environnement MWAA
+    Value: !Ref MWAAEnvironment
+  
+  MWAAWebserverUrl:
+    Description: URL de l'interface web Airflow
+    Value: !GetAtt MWAAEnvironment.WebserverUrl
+  
+  CloudWatchDashboard:
+    Description: URL vers le tableau de bord CloudWatch
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ETLDashboard}
+  
+  S3EventTriggerFunction:
+    Description: ARN de la fonction Lambda de déclenchement d'événements S3
+    Value: !GetAtt S3EventLambdaFunction.Arn

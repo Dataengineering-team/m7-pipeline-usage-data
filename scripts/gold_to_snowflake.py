@@ -164,30 +164,45 @@ def get_table_columns(conn, schema, table):
        cursor.close()
 
 def enrich_brand_data(df, brand_configs):
-   """
-   Enriches data with complete brand information based on configuration file
-   """
-   if 'BRAND' not in df.columns:
-       logger.warning("BRAND column missing in data")
-       return df
-   
-   # Create a copy of the DataFrame
-   enriched_df = df.copy()
-   
-   # Create brand mapping dictionary
-   brand_map = {
-       brand.get('file_name', ''): brand.get('brand_code', '') 
-       for brand in brand_configs.get('brands', [])
-   }
-   
-   # Apply mapping to each row
-   def map_brand(row):
-       brand_name = row['BRAND']
-       row['BRAND_CODE'] = brand_map.get(brand_name, brand_name)
-       return row
-   
-   enriched_df = enriched_df.apply(map_brand, axis=1)
-   return enriched_df
+    """
+    Enrichit les données avec les informations complètes de marque
+    en utilisant une comparaison normalisée pour plus de flexibilité
+    """
+    if 'BRAND' not in df.columns:
+        logger.warning("BRAND column missing in data")
+        return df
+    
+    # Create a copy of the DataFrame
+    enriched_df = df.copy()
+    
+    # Create brand mapping dictionary with normalized keys
+    brand_map = {}
+    for brand in brand_configs.get('brands', []):
+        # Normalize the file_name for comparison (lowercase, normalize spaces)
+        normalized_name = brand.get('file_name', '').lower().replace('-', ' ')
+        normalized_name = ' '.join(normalized_name.split()).strip()
+        brand_map[normalized_name] = brand.get('brand_code', '')
+    
+    # Apply mapping to each row with normalized comparison
+    def map_brand(row):
+        brand_name = row['BRAND']
+        # Normalize the brand name in the data for comparison
+        normalized_data_brand = brand_name.lower().replace('-', ' ')
+        normalized_data_brand = ' '.join(normalized_data_brand.split()).strip()
+        
+        # Try to find match with normalized key
+        brand_code = brand_map.get(normalized_data_brand)
+        
+        # If no match found, use original brand name
+        if brand_code is None:
+            logger.warning(f"No brand mapping found for: '{brand_name}'")
+            brand_code = brand_name
+        
+        row['BRAND_CODE'] = brand_code
+        return row
+    
+    enriched_df = enriched_df.apply(map_brand, axis=1)
+    return enriched_df
 
 def validate_data(df, table_name, validation_rules):
    """

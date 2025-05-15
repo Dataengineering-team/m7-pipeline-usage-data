@@ -11,8 +11,8 @@ build/
 
 # Environnement virtuel
 venv/
-.env
 .env.*
+.env
 
 # Fichiers de configuration utilisateur
 *.swp
@@ -22,7 +22,8 @@ venv/
 *.DS_Store
 
 # Dossiers de données volumineux ou temporaires
-scripts/deploiment/etl_layer/
+scripts/debug.py
+scripts/deploiement/etl_layer/
 data/landing/
 data/raw/
 data/silver/

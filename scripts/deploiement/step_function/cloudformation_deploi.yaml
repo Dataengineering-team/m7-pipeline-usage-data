@@ -5,7 +5,7 @@ Parameters:
   Environment:
     Description: Environment name (dev, test, prod)
     Type: String
-    Default: dev
+    Default: test
     AllowedValues:
       - dev
       - test
@@ -14,12 +14,12 @@ Parameters:
   CodeBucketName:
     Description: S3 bucket name for Lambda/Glue code deployment
     Type: String
-    Default: m7-etl-code-repository
+    Default: m7-solocco-code-repository-test
   
   DataBucketName:
     Description: S3 bucket name for ETL data
     Type: String
-    Default: m7-etl-data-bucket
+    Default: m7-etl-data-solocco-test
   
   SnowflakeUser:
     Description: Snowflake username
@@ -30,7 +30,7 @@ Parameters:
   SnowflakePassword:
     Description: Snowflake password
     Type: String
-    Default: Qazwsxedcrfv@00
+    Default: Qazwsxedcrfv@007
     NoEcho: true
   
   SnowflakeAccount:
@@ -152,27 +152,6 @@ Resources:
                 Resource: 
                   - !Sub arn:aws:s3:::${CodeBucketName}/*
   
-  # S3 Buckets
-  DataBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref DataBucketName
-      VersioningConfiguration:
-        Status: Enabled
-      LifecycleConfiguration:
-        Rules:
-          - Id: GoldRetentionRule
-            Status: Enabled
-            Prefix: gold/
-            ExpirationInDays: !Ref GoldRetentionDays
-  
-  CodeBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref CodeBucketName
-      VersioningConfiguration:
-        Status: Enabled
-  
   # Lambda Layers
   ETLDependenciesLayer:
     Type: AWS::Lambda::LayerVersion
@@ -193,8 +172,8 @@ Resources:
       Runtime: python3.11
       Handler: raw_to_silver.lambda_handler
       Role: !GetAtt ETLLambdaRole.Arn
-      Timeout: 900  # 15 minutes
-      MemorySize: 1024
+      Timeout: 900  # 15 minutes (maximum allowed)
+      MemorySize: 8192  # 8 GB
       Layers:
         - !Ref ETLDependenciesLayer
       Code:
@@ -227,8 +206,8 @@ Resources:
       Runtime: python3.11
       Handler: silver_to_gold.lambda_handler
       Role: !GetAtt ETLLambdaRole.Arn
-      Timeout: 900  # 15 minutes
-      MemorySize: 2048
+      Timeout: 900  # 15 minutes (maximum allowed)
+      MemorySize: 8192  # 8 GB
       Layers:
         - !Ref ETLDependenciesLayer
       Code:
@@ -402,7 +381,8 @@ Resources:
       Runtime: python3.11
       Handler: index.handler
       Role: !GetAtt S3EventLambdaRole.Arn
-      Timeout: 30
+      Timeout: 60  # Increased to 60 seconds
+      MemorySize: 256
       Code:
         ZipFile: |
           import json
@@ -489,7 +469,7 @@ Resources:
       Handler: maintenance.handler
       Role: !GetAtt ETLLambdaRole.Arn
       Timeout: 300  # 5 minutes
-      MemorySize: 256
+      MemorySize: 512  # Increased to 512 MB
       Code:
         ZipFile: |
           import boto3
@@ -680,14 +660,6 @@ Resources:
         }
 
 Outputs:
-  DataBucketName:
-    Description: Name of the S3 bucket for ETL data
-    Value: !Ref DataBucket
-  
-  CodeBucketName:
-    Description: Name of the S3 bucket for code artifacts
-    Value: !Ref CodeBucket
-  
   RawToSilverFunctionArn:
     Description: ARN of the Raw to Silver Lambda function
     Value: !GetAtt RawToSilverFunction.Arn
