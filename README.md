@@ -178,7 +178,7 @@ WARNING_THRESHOLD=10.0
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-organization/M7-PIPELINE-USAGE-LOCAL.git
+git clone GitHub - Dataengineering-team/m7-pipeline-usage-data: Data usage pipeline
 cd M7-PIPELINE-USAGE-LOCAL
 
 # Create a virtual environment
